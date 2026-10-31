@@ -1,0 +1,60 @@
+{
+  "fill": "#123D32",
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "BETA Badge.svg",
+          "name": "BETA Badge",
+          "position": {
+            "scale": 1,
+            "translation-in-points": [
+              -88,
+              0
+            ]
+          }
+        }
+      ],
+      "name": "BETA Badge",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.3
+      },
+      "hidden": true
+    },
+    {
+      "layers": [
+        {
+          "image-name": "StarMind.svg",
+          "name": "StarMind",
+          "position": {
+            "scale": 1,
+            "translation-in-points": [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "name": "StarMind",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.3
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

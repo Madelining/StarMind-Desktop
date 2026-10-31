@@ -1,0 +1,43 @@
+{
+  "source": "app-icon.icon",
+  "sourceSha256": "20a03e7f7c4e187b8a37f547e339e68b67453ef37de89ed6fbe2c5339ab80b93",
+  "mac": {
+    "input": "app-icon.icon",
+    "legacy": "app-icon.icns",
+    "catalogName": "Icon"
+  },
+  "png": {
+    "platform": "cross-platform",
+    "rendition": "StarMind",
+    "size": 1024
+  },
+  "linux": {
+    "input": "app-icon.png",
+    "sizes": [
+      16,
+      22,
+      24,
+      32,
+      48,
+      64,
+      128,
+      256,
+      512
+    ]
+  },
+  "outputs": {
+    "app-icon.png": "a9f332e7fa04310b63a84229005a4511bffef187328cf2eb18521dfdbef429c1",
+    "app-icon-mac.png": "c6d1ed27cacc2788d83aa2d7d10de59c3b0bc95dff6987161cf43689d1c9c125",
+    "app-icon.ico": "2b2a9e879fc0407be9a5f0c5cd502b8f238188ff9d0c3aa35c3ce827aeb02b4f",
+    "app-icon.icns": "17483fc82cc93fc88b07564b57e7be7415627a1604aa7108f9cf29e0a8604b9d",
+    "icons/16x16.png": "8d9c4f1247a9a746e8d86d407d32fafe255d09c1e8d62d469c1c6e697d7ee090",
+    "icons/22x22.png": "eb193490c0d1d2a49f62ba6bf49869414b56b2f73c2f04018303536dc0b86026",
+    "icons/24x24.png": "2ce6605cb35c9dbe7639cdf5a1d1437d8b4cc6324ab1fc506a5654e9265a12ac",
+    "icons/32x32.png": "3ebb19f273229d3f331edf4d64d5cb926da7fe5ac8888a1b90d516ae81095ef3",
+    "icons/48x48.png": "a4a40d11150bdc1c603b67712a8b797e2609ea307a75bbd7cb716755ddbc7b9b",
+    "icons/64x64.png": "771f3f4c354aba1792643a61c0a751bd2d831bf8a51d5643f433beef2bea0b81",
+    "icons/128x128.png": "ef486afcd5fd9f58b49cf02376050c5e84c8fd011febc077b73f3e5246c5675d",
+    "icons/256x256.png": "c58d856ac642e3cf4ff58bbf3424c5d42fcf58747ac1fd3220ab651f753f5d9b",
+    "icons/512x512.png": "983f92db0af0f3717dcbcfabf09301ad318e6a8ac9bb5ad35c56408fdb50447d"
+  }
+}
