@@ -28,3 +28,6 @@ out/
 .idea/
 .DS_Store
 Thumbs.db
+
+# 原始会话存档（多帧 zstd），作为完整上下文的保真副本
+!discussion/raw/*.zstd
