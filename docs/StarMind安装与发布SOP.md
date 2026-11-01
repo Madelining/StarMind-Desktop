@@ -131,7 +131,8 @@ corepack yarn workspace dsh-desktop-next test tests/starmind-branding.spec.ts te
 
 ## 8. 常见问题
 
-- 任务栏显示默认 Electron 图标：确认安装版运行的是 `StarMind Beta.exe`，不要从 `node_modules\electron` 直接启动；开发版先运行 `Start-StarMind.cmd`。
+- 任务栏按钮显示 “Electron” 或默认原子图标：Windows 把应用的 AppUserModelID（Beta 为 `ai.starmind.desktop.beta`）解析到了某个残留的 `.lnk` 快捷方式，通常是测试时手工创建的 `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Electron.lnk`，其目标是 `node_modules\electron\dist\electron.exe`。删除该快捷方式并重启 explorer 即可，必要时重启 StarMind。安装包生成的快捷方式已通过 NSIS 的 `WinShell::SetLnkAUMI` 写入正确 AUMID，全新安装不受影响。开发版请通过 `Start-StarMind.cmd` 启动，不要直接运行 `node_modules\electron`。
+- 任务栏按钮名与图标不正确时的自检：先确认安装目录里的 `StarMind Beta.exe` 图标是绿色四芒星（`Get-Item` 查看图标或 `ExtractAssociatedIcon`），再检查开始菜单是否残留指向 `electron.exe` 的快捷方式。
 - 获取模型失败：检查 Base URL、API 密钥、网络代理和网关服务状态。
 - 模型仍自称上游框架：更新到包含 `starmind-identity.ts` 的版本后重启应用。
 - Windows 提示未知发布者：本地构建未签名，正式对外分发前需要配置代码签名证书。
