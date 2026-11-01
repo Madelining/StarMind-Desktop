@@ -117,7 +117,7 @@ try {
   }
   await openShell()
   assert.notEqual(await shell.evaluate(element => getComputedStyle(element).getPropertyValue('--spacing').trim()), '')
-  assert.match(await shell.locator('h1').innerText(), /DSH Desktop Beta/)
+  assert.match(await shell.locator('h1').innerText(), /StarMind Beta/)
   await page.screenshot({ path: join(screenshots, 'onboarding-official-welcome.png') })
   await next()
   const backBounds = await shell.getByRole('button', { name: /^(上一步|Back)$/ }).boundingBox()

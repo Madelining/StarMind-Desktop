@@ -98,7 +98,7 @@ export interface DesktopTerminalOptions {
   mode?: 'normal' | 'safe' | 'recovery'
   /** Absolute working directory of the selected profile. */
   profileDir: string
-  /** Harness home exported as `DSH_HOME` inside the terminal. */
+  /** StarMind home exported as `DSH_HOME` inside the terminal. */
   homeDir: string
   /** Private directory receiving the generated terminal files. */
   stateDir: string
@@ -354,7 +354,7 @@ function macWelcome(
     `printf '%s\\n' ${quoteSh(terminalModeLabel(options.mode))}`,
     `printf '%s\\n' ${quoteSh(`Profile: ${options.profileName}`)}`,
     `printf '%s\\n' ${quoteSh(`Profile directory: ${options.profileDir}`)}`,
-    `printf '%s\\n' ${quoteSh(`Harness home: ${options.homeDir}`)}`,
+    `printf '%s\\n' ${quoteSh(`StarMind home: ${options.homeDir}`)}`,
     `printf '%s\\n' ${quoteSh(`Plugin commands without --profile modify the ${options.profileName} profile.`)}`,
     `printf '%s\\n' ${quoteSh('Commands:')}`,
     `printf '  %s\\n' ${quoteSh(commandHelp)}`,
@@ -398,7 +398,7 @@ function windowsWelcome(): string {
     `Write-Host $env:${WINDOWS_TERMINAL_MODE}`,
     `Write-Host ("Profile: {0}" -f $env:${DEFAULT_PROFILE})`,
     `Write-Host ("Profile directory: {0}" -f $env:${WINDOWS_PROFILE_DIRECTORY})`,
-    `Write-Host ("Harness home: {0}" -f $env:${DSH_HOME})`,
+    `Write-Host ("StarMind home: {0}" -f $env:${DSH_HOME})`,
     `Write-Host ("Plugin commands without --profile modify the {0} profile." -f $env:${DEFAULT_PROFILE})`,
     `Write-Host 'Commands:'`,
     `Write-Host '  ${commandHelp}'`,
@@ -425,7 +425,7 @@ function windowsCmdWelcome(): string {
     `echo(!${WINDOWS_TERMINAL_MODE}!`,
     `echo(Profile: !${DEFAULT_PROFILE}!`,
     `echo(Profile directory: !${WINDOWS_PROFILE_DIRECTORY}!`,
-    `echo(Harness home: !${DSH_HOME}!`,
+    `echo(StarMind home: !${DSH_HOME}!`,
     `echo(Plugin commands without --profile modify the !${DEFAULT_PROFILE}! profile.`,
     'echo(Commands:',
     `echo(  ${escapeBatchText(commandHelp)}`,
@@ -450,7 +450,7 @@ function prepareDesktopTerminalFiles(options: DesktopTerminalOptions): DesktopTe
     ['pnpm entry', options.pnpmBinPath],
     ['Electron version', options.electronVersion],
     ['profile directory', options.profileDir],
-    ['Harness home', options.homeDir],
+    ['StarMind home', options.homeDir],
     ['state directory', options.stateDir],
     ['product version', options.productVersion],
   ] as const) assertScriptValue(label, value)

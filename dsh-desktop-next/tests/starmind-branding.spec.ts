@@ -5,9 +5,9 @@ import { updateAction, updateLabel } from '../src/update-state.ts'
 
 describe('StarMind presentation', () => {
   it('rebrands product copy while preserving provider module IDs, API endpoints and model names', () => {
-    const source = '"DeepSeek Harness"; "探索未至之境"; "Into the Unknown"; "深度求索中"; "HARNESS"; "@deepseek-ai/dsh"; "https://api.deepseek.com"; "deepseek-chat"'
+    const source = '"DeepSeek Harness"; "DSH"; "Harness"; "dsh web"; "探索未至之境"; "Into the Unknown"; "深度求索中"; "HARNESS"; "@deepseek-ai/dsh"; "https://api.deepseek.com"; "deepseek-chat"'
     const branded = brandClientSource(source)
-    expect(branded).toContain('"StarMind"; "让专注成为一种习惯"; "Make focus a habit"; "深度思考中"; "STARMIND"')
+    expect(branded).toContain('"StarMind"; "StarMind"; "StarMind"; "StarMind Web"; "让专注成为一种习惯"; "Make focus a habit"; "深度思考中"; "STARMIND"')
     expect(branded).toContain('"@deepseek-ai/dsh"; "https://api.deepseek.com"; "deepseek-chat"')
     expect(brandWebIndex('<head><title>DeepSeek Harness</title><link rel="icon" href="favicon.svg"></head>')).toContain('<title>StarMind</title>')
     expect(brandWebIndex('<link rel="icon" href="favicon.svg">')).toContain('data:image/svg+xml,')

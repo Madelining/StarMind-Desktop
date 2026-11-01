@@ -42,7 +42,7 @@ export const BUILT_IN_MARKET_SOURCES: readonly BuiltInMarketDefinition[] = [
     key: 'dsh-1024store',
     bundle: COMMUNITY_MARKET,
     providerId: 'com.deepseek1024.catalog',
-    title: { zh: 'DSH 1024Store（社区插件市场）', en: 'DSH 1024Store (Community Market)' },
+    title: { zh: 'StarMind 1024Store（社区插件市场）', en: 'StarMind 1024Store (Community Market)' },
     description: {
       zh: '社区插件市场内置源，提供经过策展的插件目录与版本索引。',
       en: 'Built-in Community Market provider with curated plugin listings and version metadata.',
@@ -105,7 +105,7 @@ export const BUILT_IN_MARKET_SOURCES: readonly BuiltInMarketDefinition[] = [
       },
       {
         url: 'https://api.dshfind.com/market/dsh-index.json',
-        label: { zh: 'dshfind 索引源（DSH 插件目录）', en: 'dshfind index source (DSH Plugin Directory)' },
+        label: { zh: 'dshfind 索引源（StarMind 插件目录）', en: 'dshfind index source (StarMind Plugin Directory)' },
         tags: [
           { zh: '全量索引', en: 'Full index' },
           { zh: 'format 1', en: 'format 1' },
@@ -117,7 +117,7 @@ export const BUILT_IN_MARKET_SOURCES: readonly BuiltInMarketDefinition[] = [
   {
     key: 'dshmarket',
     bundle: DSH_MARKET,
-    title: { zh: 'dsh-market（Awesome DSH Plugin）', en: 'dsh-market (Awesome DSH Plugin)' },
+    title: { zh: 'dsh-market（Awesome StarMind Plugin）', en: 'dsh-market (Awesome StarMind Plugin)' },
     description: {
       zh: `第三方插件市场，提供已适配“${OFFICIAL_PLUGIN_INDEX.title.zh}”格式（format 1）的国内 CDN 与 GitHub Pages 索引源。`,
       en: `Third-party plugin market with China CDN and GitHub Pages index sources adapted for the "${OFFICIAL_PLUGIN_INDEX.title.en}" format (format 1).`,

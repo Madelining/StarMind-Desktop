@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
-import { APP_BOOT_SCRIPT, serveWebDocument } from '../lib/web-document.js'
+import { APP_BOOT_SCRIPT, brandWebIndex, serveWebDocument } from '../lib/web-document.js'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const require = createRequire(import.meta.url)
@@ -17,7 +17,7 @@ const html = await local.text()
 assert.equal(local.status, 200)
 assert.ok(html.includes('<style id="dsh-next-loading-style">'), 'Next must style the document before the official boot page loads')
 assert.equal(html.replace(/<style id="dsh-next-loading-style">[\s\S]*?<\/style>/u, '')
-  .replace(APP_BOOT_SCRIPT, ''), official)
+  .replace(APP_BOOT_SCRIPT, ''), brandWebIndex(official))
 assert.ok(html.includes('/assets/'), 'Official production frontend must carry built assets')
 
 // Electron hides custom-protocol Worker requests from webRequest, so the upload

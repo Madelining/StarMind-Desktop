@@ -19,7 +19,7 @@ const readEntitlements: ReadEntitlements = (path, arch) => {
 /** Both Universal slices and every Electron Helper must retain microphone access. */
 export function verifyNextMacEntitlements(appPath: string, read: ReadEntitlements = readEntitlements): void {
   const targets = [appPath, ...['', ' (Renderer)', ' (GPU)', ' (Plugin)']
-    .map(suffix => join(appPath, 'Contents', 'Frameworks', `DSH NEXT Helper${suffix}.app`))]
+    .map(suffix => join(appPath, 'Contents', 'Frameworks', `StarMind Next Helper${suffix}.app`))]
   for (const target of targets) {
     for (const arch of ['arm64', 'x86_64']) {
       const entitlements = read(target, arch)

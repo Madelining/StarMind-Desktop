@@ -3,13 +3,18 @@ import { STARMIND_LOGO_SVG } from './starmind-artwork.ts'
 export { STARMIND_LOGO_SVG } from './starmind-artwork.ts'
 export const STARMIND_NAME = 'StarMind'
 export const STARMIND_TAGLINE = '让专注成为一种习惯'
-export const STARMIND_IDENTITY = 'You are StarMind, an AI assistant that helps users focus and complete tasks. StarMind: 让专注成为一种习惯。'
+export const STARMIND_IDENTITY = 'You are StarMind, an AI assistant that helps people focus and complete tasks. StarMind: 让专注成为一种习惯。'
 
 export const STARMIND_LOGO_DATA_URL = 'data:image/svg+xml,' + encodeURIComponent(STARMIND_LOGO_SVG)
 
 /** Keep upstream modules intact on disk; replace product copy as the Desktop serves its UI. */
 export function brandClientSource(source: string): string {
   return source.replaceAll('DeepSeek Harness', STARMIND_NAME)
+    .replaceAll('Harness home', `${STARMIND_NAME} home`)
+    .replace(/\bHarness\b/gu, STARMIND_NAME)
+    .replace(/\bDSH\b/gu, STARMIND_NAME)
+    .replaceAll('dsh web', `${STARMIND_NAME} Web`)
+    .replaceAll('dsh desktop', `${STARMIND_NAME} desktop`)
     .replaceAll('探索未至之境', STARMIND_TAGLINE)
     .replaceAll('Into the Unknown', 'Make focus a habit')
     .replaceAll('深度求索中', '深度思考中')

@@ -4,6 +4,7 @@ import { extname, resolve, sep } from 'node:path'
 import type { OnBeforeSendHeadersListenerDetails, WebContents } from 'electron'
 import { NATIVE_ACCESS_HEADER } from './desktop-contract.ts'
 import { brandClientSource, brandWebIndex, starmindBrandAsset } from './starmind-branding.ts'
+export { brandClientSource, brandWebIndex, starmindBrandAsset } from './starmind-branding.ts'
 
 const MIME: Readonly<Record<string, string>> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',

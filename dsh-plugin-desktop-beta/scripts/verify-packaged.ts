@@ -29,7 +29,7 @@ interface PackContext {
  * @param context - Electron Builder's afterPack context.
  */
 export default async function afterPack(context: PackContext): Promise<void> {
-  const resources = context.electronPlatformName === 'darwin' ? join(context.appOutDir, 'DSH Desktop Beta.app/Contents/Resources') : join(context.appOutDir, 'resources')
+  const resources = context.electronPlatformName === 'darwin' ? join(context.appOutDir, 'StarMind Beta.app/Contents/Resources') : join(context.appOutDir, 'resources')
   if (!existsSync(join(resources, 'app.asar'))) throw new Error('Next must package its application into app.asar like upstream Desktop')
   if (context.electronPlatformName === 'darwin' && /-(?:x64|arm64)-temp$/u.test(context.appOutDir)) {
     // electron-builder's universal packager immediately merges the two temporary per-CPU bundles
@@ -50,7 +50,7 @@ export default async function afterPack(context: PackContext): Promise<void> {
     const unpacked = source.list().filter(entry => entry.unpacked).length
     const { release } = descriptor
     console.log(`Verified the archive against the prepared Next payload: ${String(descriptor.files.length)} files (${String(unpacked)} unpacked) for ${descriptor.platform} ${descriptor.archs.join('/')}; `
-      + `DSH Desktop Beta ${release.version}, dsh ${release.dshVersion}, Electron ${release.electronVersion}, pnpm ${release.pnpmVersion}`
+      + `StarMind Beta ${release.version}, dsh ${release.dshVersion}, Electron ${release.electronVersion}, pnpm ${release.pnpmVersion}`
       + (rewrittenPlists.length === 0 ? '' : `; the universal merge rewrote ${rewrittenPlists.join(', ')}`))
   } finally { source.close() }
   const runtimes = packagingStepSync('runtime:verify-packaged', () => verifyNextRuntimeTree(join(resources, 'runtime'), platform, expectedNextVersion(context.packager.projectDir)))

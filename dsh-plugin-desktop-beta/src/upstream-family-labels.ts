@@ -56,8 +56,8 @@ export const OFFICIAL_OAR_SUBAGENTS = {
           id: 'danger-full-access',
           title: { zh: '不限制', en: 'Full access' },
           description: {
-            zh: '不使用沙箱，可以运行任何命令、修改任何文件，DSH 的沙箱也不约束它。只在你信任任务时使用。',
-            en: 'Runs without a sandbox, so it can run any command and change any file, and the DSH sandbox does not confine it. Use it only for tasks you trust.',
+            zh: '不使用沙箱，可以运行任何命令、修改任何文件，StarMind 的沙箱也不约束它。只在你信任任务时使用。',
+            en: 'Runs without a sandbox, so it can run any command and change any file, and the StarMind sandbox does not confine it. Use it only for tasks you trust.',
           },
           launchArgs: ['-c', 'sandbox_mode="danger-full-access"'],
           unrestricted: true,
@@ -101,8 +101,8 @@ export const OFFICIAL_OAR_SUBAGENTS = {
           id: 'bypassPermissions',
           title: { zh: '完全放行', en: 'Bypass permissions' },
           description: {
-            zh: '跳过权限检查，几乎可以运行任何命令、修改任何文件，DSH 的沙箱也不约束它。只在你信任任务时使用。',
-            en: 'Skips permission checks, so it can run almost any command and change almost any file, and the DSH sandbox does not confine it. Use it only for tasks you trust.',
+            zh: '跳过权限检查，几乎可以运行任何命令、修改任何文件，StarMind 的沙箱也不约束它。只在你信任任务时使用。',
+            en: 'Skips permission checks, so it can run almost any command and change almost any file, and the StarMind sandbox does not confine it. Use it only for tasks you trust.',
           },
           launchArgs: ['--permission-mode', 'bypassPermissions', '--permission-prompts', 'none'],
           unrestricted: true,

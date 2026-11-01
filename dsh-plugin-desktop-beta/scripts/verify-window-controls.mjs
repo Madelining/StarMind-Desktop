@@ -365,7 +365,7 @@ try {
       `Market choices retain their stylesheet ${stage}`)
   }
   await assertMarketStyles('on initial load')
-  await communityChoice.getByText('DSH Desktop 内置的开放插件市场，支持添加和选择自定义插件数据源。').waitFor()
+  await communityChoice.getByText('StarMind 内置的开放插件市场，支持添加和选择自定义插件数据源。').waitFor()
   assert.equal(await dshChoice.getByRole('link', { name: 'awesome-dsh-plugin', exact: true }).count(), 1)
   const waitSelected = async choice => {
     await page.waitForFunction(selector => {
@@ -680,7 +680,7 @@ try {
   await openSettingsPanel()
   // Native shortcuts appear on every official Settings section, like the original Desktop.
   const actions = page.locator('.dshDesktopNativeActions[data-placement="settings"]')
-  await actions.getByRole('button', { name: /^(打开 DSH 终端|Open DSH Terminal)$/ }).click()
+  await actions.getByRole('button', { name: /^(打开 StarMind 终端|Open StarMind Terminal)$/ }).click()
   assert.equal(controlCommands.at(-1).type, 'terminal')
   const restartOptions = actions.getByRole('button', { name: /^(重启|Restart)$/ })
   await restartOptions.click()
@@ -692,7 +692,7 @@ try {
   assert.equal(controlCommands.at(-1).type, 'restart-recovery')
   await page.getByRole('button', { name: /^(桌面设置|Desktop settings)$/ }).click()
   const settings = page.locator('[data-next-desktop-settings]')
-  await settings.getByRole('heading', { name: /^(DSH Desktop Beta 设置|DSH Desktop Beta settings)$/ }).waitFor()
+  await settings.getByRole('heading', { name: /^(StarMind Beta 设置|StarMind Beta settings)$/ }).waitFor()
   const pluginNotice = settings.locator('[data-next-plugin-settings-notice]')
   await pluginNotice.getByText('插件市场和远程控制设置已移至插件页面。', { exact: true }).waitFor()
   await page.screenshot({ path: join(screenshots, 'desktop-plugin-settings-notice.png'), animations: 'disabled' })
@@ -703,7 +703,7 @@ try {
   assert.equal(await context.pages().length, 1, 'Leaving Settings for Plugins must reuse the main window')
   await openSettingsPanel()
   await page.getByRole('button', { name: /^(桌面设置|Desktop settings)$/ }).click()
-  await settings.getByRole('heading', { name: /^(DSH Desktop Beta 设置|DSH Desktop Beta settings)$/ }).waitFor()
+  await settings.getByRole('heading', { name: /^(StarMind Beta 设置|StarMind Beta settings)$/ }).waitFor()
   assert.equal(await settings.locator('nav').count(), 0)
   const updateSection = settings.locator('[data-next-updates]')
   const releaseNotes = updateSection.getByRole('link', { name: /^(更新公告|Release notes)$/ })
@@ -798,9 +798,9 @@ try {
   // Windows offers no window material, so the material selector disappears entirely.
   assert.equal(await settings.locator('[data-desktop-material-row]').count(), 0)
   controlState.platform = 'linux'
-  await actions.getByRole('button', { name: /打开 DSH 终端|Open DSH Terminal/ }).waitFor({ state: 'hidden' })
+  await actions.getByRole('button', { name: /打开 StarMind 终端|Open StarMind Terminal/ }).waitFor({ state: 'hidden' })
   controlState.platform = 'darwin'
-  await actions.getByRole('button', { name: /打开 DSH 终端|Open DSH Terminal/ }).waitFor({ state: 'visible' })
+  await actions.getByRole('button', { name: /打开 StarMind 终端|Open StarMind Terminal/ }).waitFor({ state: 'visible' })
   // Each local/LAN login link has its own row and native open/copy target.
   const webSettings = settings.locator('section[aria-labelledby="dsh-desktop-web-title"]')
   const browserAccess = webSettings.getByRole('switch', { name: /允许在浏览器中打开|Allow opening this Profile in a browser/ })
@@ -952,7 +952,7 @@ try {
   await webPage.getByRole('button', { name: /^(插件|Plugins)$/ }).click()
   await webPage.locator('[data-next-plugin-controls]').waitFor()
   await webPage.locator('[data-next-computer-use]').getByRole('button', { name: /^(权限设置|Permission settings)$/ }).click()
-  await webPage.getByRole('dialog', { name: /^(系统权限|System permissions)$/ }).getByText(/请在运行 DSH 的桌面应用中管理系统权限/).waitFor()
+  await webPage.getByRole('dialog', { name: /^(系统权限|System permissions)$/ }).getByText(/请在 StarMind 桌面应用中管理系统权限/).waitFor()
   await webPage.getByRole('dialog', { name: /^(系统权限|System permissions)$/ }).press('Escape')
   await verifyWebBrowserFallback(webPage)
   await webContext.close()

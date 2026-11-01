@@ -26,6 +26,7 @@ import { installSkillBadgeResolution } from './skill-badge.ts'
 import { formatFatalDiagnostic } from './fatal-diagnostic.ts'
 import * as desktopOffice from './office.ts'
 import { resolveOfficeConfig } from './office.ts'
+import { applyStarMindAgentIdentity } from './starmind-identity.ts'
 
 export async function main(): Promise<void> {
   // The Host lists and reads user workspaces; see asar-archive-policy.ts.
@@ -134,6 +135,12 @@ export async function main(): Promise<void> {
   })
   process.once('disconnect', () => { void stop().catch(fatal) })
   const { ctx } = await application
+  ctx.effect(
+    () => ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+      return applyStarMindAgentIdentity(await next())
+    }),
+    'StarMind: enforce the final product identity',
+  )
   operations?.observe(ctx)
   // Office skills and the workspace dependency tool need the bundled payload; a packaged Host without it fails here.
   const office = resolveOfficeConfig(runtimeDir, primaryRuntime, home)

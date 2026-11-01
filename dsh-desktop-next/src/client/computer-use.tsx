@@ -194,7 +194,7 @@ export function ComputerUseSettings({ context, zh, mode = 'overview' }: { contex
         </ul>
       </section>
       {window.desktopNext?.permissions ? <PermissionDetails service={window.desktopNext.permissions} language={zh ? 'zh' : 'en'} />
-        : <p>{t('请在运行 DSH 的桌面应用中管理系统权限。', 'Manage system permissions in the desktop app running DSH.')}</p>}
+        : <p>{t('请在 StarMind 桌面应用中管理系统权限。', 'Manage system permissions in the StarMind desktop app.')}</p>}
     </>}
     {notice && <Toast text={notice} onDone={() => { setNotice('') }} />}
     {error && <Toast text={error} onDone={() => { setError('') }} />}

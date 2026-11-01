@@ -51,7 +51,7 @@ export function DesktopPermissionsDialog({ open, onClose, service, language, per
       closeLabel={zh ? '关闭' : 'Close'} className="dshNextPermissionsDialog"
       description={zh ? '按需授权。更改系统权限后，可能需要重启应用。' : 'Grant access when needed. You may need to restart the app after changing system permissions.'}>
       <div ref={body}>{open && (service ? <PermissionDetails service={service} language={language} permission={permission} />
-        : <p role="status">{zh ? '请在运行 DSH 的桌面应用中管理系统权限。' : 'Manage system permissions in the desktop app running DSH.'}</p>)}
+        : <p role="status">{zh ? '请在 StarMind 桌面应用中管理系统权限。' : 'Manage system permissions in the StarMind desktop app.'}</p>)}
       </div>
     </Modal>
 }
