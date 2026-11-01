@@ -49,6 +49,30 @@ describe('Windows NSIS running-app handoff', () => {
     expect(script).toContain('${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "--updated"')
     expect(script).toContain('!insertmacro quitSuccess')
   })
+
+  it('installs the bundled plugin kit before the wizard can close', () => {
+    const script = readFileSync(join(process.cwd(), 'build', 'installer.nsh'), 'utf8')
+
+    expect(script).toContain('!macro dsh_install_plugin_kit')
+    expect(script).toContain('$INSTDIR\\resources\\plugin-kit')
+    expect(script).toContain('bootstrap-plugins.mjs')
+    // 187 MB 的 Office 包不随安装器分发，必须显式排除，否则内网安装会卡住
+    expect(script).toContain('--exclude dsh-univer-office')
+    // 安装器没有控制台，日志是唯一排障线索
+    expect(script).toContain('--log "$TEMP\\starmind-plugin-kit.log"')
+
+    // 必须挂在 customInstall 里、且在 in-app update 的提前退出之前
+    const install = script.indexOf('!macro customInstall')
+    const insert = script.indexOf('!insertmacro dsh_install_plugin_kit')
+    // ${isForceRun} 在 customInit 里也出现，所以用提前退出分支独有的调用做锚点
+    const earlyExit = script.indexOf('${StdUtils.ExecShellAsUser}')
+    expect(install).toBeGreaterThanOrEqual(0)
+    expect(insert).toBeGreaterThan(install)
+    expect(earlyExit).toBeGreaterThan(insert)
+
+    // 缺 kit 或解释器时静默跳过，不能把安装搞失败
+    expect(script).toContain('dsh_plugin_kit_done:')
+  })
 })
 
 describe('Windows assisted installer messages', () => {

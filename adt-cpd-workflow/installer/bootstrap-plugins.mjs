@@ -17,7 +17,7 @@
  *        [--exclude a,b] [--store-dir <pnpm store>] [--offline] [--dry-run]
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
@@ -30,7 +30,7 @@ const opt = (name, fallback = undefined) => {
 }
 const flag = name => args.includes(`--${name}`)
 
-const home = opt('home')
+const home = opt('home') ?? resolveDshHome()
 const kitDir = opt('kit')
 const profileName = opt('profile', 'desktop')
 const nodeBin = opt('node', process.execPath)
@@ -39,14 +39,31 @@ const exclude = String(opt('exclude', '')).split(',').map(s => s.trim()).filter(
 const storeDir = opt('store-dir')
 const offline = flag('offline')
 const dryRun = flag('dry-run')
+const logFile = opt('log')
+
+/** 安装器不传 --home 时自行推断：DSH_HOME → ~/.dsh-beta → ~/.dsh */
+function resolveDshHome() {
+  if (process.env.DSH_HOME) return process.env.DSH_HOME
+  const profileRoot = process.env.USERPROFILE ?? process.env.HOME ?? ''
+  for (const name of ['.dsh-beta', '.dsh']) {
+    const candidate = join(profileRoot, name)
+    if (existsSync(candidate)) return candidate
+  }
+  return undefined
+}
 
 if (!home || !kitDir) {
-  console.error('用法：node bootstrap-plugins.mjs --home <DSH_HOME> --kit <kit 目录> [--pnpm <pnpm.mjs>] [--exclude a,b] [--dry-run]')
+  console.error('用法：node bootstrap-plugins.mjs [--home <DSH_HOME>] --kit <kit 目录> [--pnpm <pnpm.mjs>] [--exclude a,b] [--store-dir <store>] [--offline] [--log <文件>] [--dry-run]')
   process.exit(2)
 }
 
 const log = []
-const say = line => { log.push(line); console.log(line) }
+const say = line => {
+  log.push(line)
+  console.log(line)
+  // 安装器里没有控制台，日志是唯一的排障线索
+  if (logFile) { try { appendFileSync(logFile, line + '\n', 'utf8') } catch { /* 日志写不进去也不能中断安装 */ } }
+}
 
 const kit = JSON.parse(readFileSync(join(kitDir, 'plugin-kit.json'), 'utf8'))
 const profileDir = join(home, 'profiles', profileName)

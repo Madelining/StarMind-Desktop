@@ -1,18 +1,79 @@
 # 安装器预置插件（B 方案）
 
-目标：让同事**装完客户端就有插件**，而不是装完再想起来去跑一遍脚本。
+目标：让同事**装完客户端就有插件**，不需要任何手动步骤。
 
-## 现状：脚本就位，还没接进安装器
+## 现状：已经接进安装器，但还没打包验证
 
 | 环节 | 状态 |
 |---|---|
-| `bootstrap-plugins.mjs`（预置脚本） | ✅ 已写好，支持 `--dry-run`、幂等 |
+| `bootstrap-plugins.mjs`（预置脚本） | ✅ 已写好，支持 `--dry-run`、`--log`、`--offline`，幂等 |
 | `plugin-kit.json`（预置清单） | ✅ 8 个插件，含 1 个默认排除项 |
-| 接入产品安装器（NSIS `customInstall`） | ❌ 未做——StarMind 客户端安装器不由本仓库构建 |
-| 出内部分发包 | ❌ 未做 |
-| 干净机器上验证 | ❌ 未做 |
+| 随安装包分发 kit | ✅ 已加 `win.extraResources`（两个 variant 都改了） |
+| 安装时自动执行 | ✅ 已加到 `build/installer.nsh` 的 `customInstall` |
+| 单元断言 | ✅ `tests/installer-nsh.spec.ts` 新增 1 条用例 |
+| **真实打包验证** | ❌ **没有跑过 `dist:win:beta`** |
+| 干净机器验证 | ❌ 未做 |
 
-**所以：现在拿到这个分支的人，仍然需要手动跑 `scripts/install-plugins.ps1`。**
+## 接线方式（已落在仓库里）
+
+**1. 随包分发**——`dsh-plugin-desktop(-beta)/package.json`：
+
+```jsonc
+"win": {
+  "extraResources": [
+    { "from": ".desktop-build/runtime", "to": "runtime" },
+    { "from": "../adt-cpd-workflow/installer/bootstrap-plugins.mjs", "to": "plugin-kit/bootstrap-plugins.mjs" },
+    { "from": "../adt-cpd-workflow/installer/plugin-kit.json",           "to": "plugin-kit/plugin-kit.json" },
+    { "from": "../adt-cpd-workflow/plugins/vendor",                       "to": "plugin-kit/vendor" }
+  ]
+}
+```
+
+装完后落在 `$INSTDIR\resources\plugin-kit\`，与 `resources\runtime\` 并列。
+
+**2. 安装时执行**——`dsh-plugin-desktop/build/installer.nsh`（两个 variant 共用这一个文件）：
+
+```nsis
+!macro dsh_install_plugin_kit
+  StrCpy $R5 "$INSTDIR\resources\plugin-kit"
+  StrCpy $R6 "$INSTDIR\resources\runtime\x64\primary-runtime\dependencies\node\bin\node.exe"
+  StrCpy $R7 "$INSTDIR\resources\runtime\x64\primary-runtime\dependencies\pnpm\bin\pnpm.mjs"
+  IfFileExists "$R5\bootstrap-plugins.mjs" 0 dsh_plugin_kit_done
+  IfFileExists "$R6" 0 dsh_plugin_kit_done
+  IfFileExists "$R7" 0 dsh_plugin_kit_done
+  DetailPrint "Preparing bundled plugins..."
+  ExecWait '"$R6" "$R5\bootstrap-plugins.mjs" --kit "$R5" --pnpm "$R7" --exclude dsh-univer-office --log "$TEMP\starmind-plugin-kit.log"'
+  dsh_plugin_kit_done:
+!macroend
+
+!macro customInstall
+  !insertmacro dsh_install_plugin_kit   ; 在 in-app update 的提前退出之前
+  ...
+!macroend
+```
+
+几个刻意的选择：
+
+- **`ExecWait` 而不是 `Exec`**：串行执行，避免安装器关掉后首次启动撞上"插件装一半"。代价是安装多花几十秒。
+- **`--exclude dsh-univer-office`**：187 MB，且需要联网；不能让它拖死内网安装。
+- **失败不阻断**：缺 kit、缺 node、装包失败都只写日志，`customInstall` 继续走。
+- **日志到 `%TEMP%\starmind-plugin-kit.log`**：安装器没有控制台，出问题只能靠这个文件。
+- **`--home` 不传**：由脚本自己推断（`DSH_HOME` → `~/.dsh-beta` → `~/.dsh`），避免安装器在提权场景下猜错用户目录。
+
+## 两条路的关系
+
+| 场景 | 用哪条 |
+|---|---|
+| 正常安装（内网能访问 npm 或内网镜像） | **安装器自动装**，用户无感 |
+| 内网完全访问不了 registry | 安装器这一步会失败（写日志），改用 [`offline/`](../offline/README.md) 的基线包 |
+| 已经装了客户端、只想补插件 | 基线包或 `scripts/install-plugins.ps1` |
+
+## 打包前必须确认的
+
+1. `corepack yarn check:win-package:platform` —— 确认 `tests/installer-nsh.spec.ts` 与 package 相关用例通过
+2. `corepack yarn check:desktop-variants` —— 两个 variant 的 `package.json` 改动一致
+3. 一次 `corepack yarn dist:win:beta` —— 装完打开，看 `resources\plugin-kit\` 是否存在、`%TEMP%\starmind-plugin-kit.log` 写了什么
+
 
 ## 两个文件
 

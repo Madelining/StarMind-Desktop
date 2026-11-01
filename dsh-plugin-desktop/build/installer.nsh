@@ -98,10 +98,36 @@ Var pid
   !endif
 !macroend
 
+; Install the bundled plugin kit into the desktop Profile so the user never has
+; to run a script after installation.
+;
+; The kit ships beside the runtime (resources\plugin-kit + resources\runtime).
+; Every step is best-effort: a build without the kit, a missing interpreter, or
+; a failed package install only writes a log line and never fails the installer.
+; The installer has no console, so progress goes to $TEMP\starmind-plugin-kit.log.
+!macro dsh_install_plugin_kit
+  StrCpy $R5 "$INSTDIR\resources\plugin-kit"
+  StrCpy $R6 "$INSTDIR\resources\runtime\x64\primary-runtime\dependencies\node\bin\node.exe"
+  StrCpy $R7 "$INSTDIR\resources\runtime\x64\primary-runtime\dependencies\pnpm\bin\pnpm.mjs"
+
+  IfFileExists "$R5\bootstrap-plugins.mjs" 0 dsh_plugin_kit_done
+  IfFileExists "$R6" 0 dsh_plugin_kit_done
+  IfFileExists "$R7" 0 dsh_plugin_kit_done
+
+  DetailPrint "Preparing bundled plugins..."
+  ; dsh-univer-office is ~187 MB and is installed on demand, not with the kit.
+  ExecWait '"$R6" "$R5\bootstrap-plugins.mjs" --kit "$R5" --pnpm "$R7" --exclude dsh-univer-office --log "$TEMP\starmind-plugin-kit.log"'
+
+  dsh_plugin_kit_done:
+!macroend
+
 ; When launched visibly by an in-app update (--updated --force-run), relaunch
 ; the updated application and close the installer as soon as extraction finishes
 ; without stopping on the Finish wizard page.
 !macro customInstall
+  ; Runs before the early exit below so in-app updates also refresh the kit.
+  !insertmacro dsh_install_plugin_kit
+
   ${if} ${isUpdated}
   ${andIf} ${isForceRun}
   ${andIfNot} ${Silent}
