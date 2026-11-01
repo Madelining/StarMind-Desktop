@@ -1,0 +1,1356 @@
+/**
+ * Browser settings panel (client half): the switches that decide how the shared
+ * browser behaves — history retention, login-state persistence, presentation,
+ * vision strategy, credential access, and which ACTIONS the agent may take —
+ * the one group of switches written where no tool can reach them.
+ *
+ * The host half owns the document and serves it at `/dsh-builtin-browser/settings`;
+ * this panel only renders it and sends patches, so the same file stays the single
+ * source of truth (and hand-editable when no panel is reachable).
+ *
+ * Registered into the settings page's `settings.section` slot with an order above
+ * the host's own rows, so it appears under them. Plain ModuleLoader bundle: no
+ * build step, matching how the host loads plugin client halves.
+ */
+window.__ModuleLoader__.load({ id: "dsh-builtin-browser", factory: (require) => {
+  var module = { exports: {} }
+  var exports = module.exports
+  Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" })
+
+  const react = require("react")
+  const h = react.createElement
+  const { useCallback, useEffect, useRef, useState } = react
+
+  const name = "dsh-builtin-browser"
+  const inject = ["slots", "locale"]
+  const NS = "settings.dsh-builtin-browser"
+  const ROUTE = "/dsh-builtin-browser/settings"
+  let translate = (key) => key
+
+  const zh = {
+    nav: "浏览器",
+    "watch.open": "观看浏览器",
+    "watch.title": "实时画面",
+    "watch.readOnly": "只读,不转发点击与输入",
+    "watch.stop": "停止",
+    "watch.live": "直播",
+    "watch.paused": "已暂停",
+    "watch.stopped": "已停止",
+    "watch.connecting": "连接中",
+    "watch.disconnected": "连接中断",
+    "watch.disabled": "主机未开启远程观看",
+    "watch.noPage": "该任务尚未打开浏览器",
+    "watch.bridgeStale": "桌面端升级后 bridge 已失效,请重跑安装:",
+    "watch.bridgeMissing": "桌面 bridge 未安装,侧栏载体不可用。安装命令:",
+    title: "浏览器(Browser Use)",
+    lead: "多数设置立即生效。保留 cookies 与无头模式仅适用于本机 Chrome / Edge,修改后需重新选择载体或重启 DSH。",
+    loading: "读取设置…",
+    failed: "读取设置失败:",
+    retry: "重试",
+    saved: "已保存",
+    path: "设置文件",
+    "history.title": "浏览历史",
+    "history.enabled": "保留浏览历史",
+    "history.hint": "记录访问过的页面;关闭浏览器后仍可查询并重新打开,关闭此开关后不再记录新访问。",
+    "cookies.title": "登录状态",
+    "cookies.persist": "保留 cookies",
+    "cookies.hint": "仅控制本机 Chrome / Edge 的独立 profile:关闭后下次启动使用临时 profile;需重新选择载体或重启 DSH。内置 Electron 与桌面侧栏的登录态由各自载体保存。",
+    "ui.title": "展示",
+    "ui.autoExpandOnce": "侧栏自动展开(每轮一次)",
+    "ui.autoExpandOnce.hint": "Agent 首次操作时自动展开;你手动收起后,本轮不再打扰。",
+    "ui.closeWithSession": "会话结束时关闭浏览器",
+    "ui.closeWithSession.hint": "关闭会释放浏览器进程;浏览历史与登录状态会保留。",
+    "ui.virtualCursor": "显示可视化鼠标",
+    "ui.virtualCursor.hint": "让 Agent 正在操作的位置可见(出现即代表它在接管该标签页)。",
+    "vision.title": "视觉策略",
+    "vision.strategy": "默认策略",
+    "vision.auto": "Auto(坐标与语义都允许;适合能读图的模型)",
+    "vision.nonVisual": "纯非视觉(拒绝坐标点击,只用 DOM / 无障碍树定位)",
+    "vision.hint": "纯非视觉下,坐标点击会被明确拒绝并提示改用语义定位,避免靠猜坐标点错。两种策略下 DOM、无障碍树、文本提取与结构化抓取的能力完全一致 —— 不需要图像输入也能完整操作页面。",
+    "credentials.title": "凭据",
+    "credentials.allowRead": "允许 Agent 读取 cookies / 导出登录状态",
+    "browser.title": "浏览器载体",
+    "browser.channel": "使用哪个浏览器",
+    "browser.sidebar": "侧栏浏览器(在 DSH 窗口右侧打开,不额外拉窗口)",
+  "browser.bundled": "内置 Electron(随插件提供,无需安装)",
+    "browser.chrome": "本机 Chrome",
+    "browser.edge": "本机 Edge",
+    "browser.auto": "自动(优先 Chrome,其次 Edge)",
+    "browser.hint": "选本机浏览器时会以**独立 profile** 启动它:不会打开、占用或修改你日常的窗口、书签与登录状态,关闭也不会关掉你自己的浏览器;代价是它看不到你日常浏览器里已登录的站点,需要时请在那个窗口里登录一次(登录态会留在插件自己的 profile 里)。桌面端默认由官方侧栏承载页面,此选项优先于侧栏。",
+    "credentials.hint": "关闭后 dsh_browser_auth 的导出会被拒绝,报 BROWSER_AUTH_DISABLED —— 导出读的是整台机器共享的 cookie 罐(按当前页所属站点收敛)。它只管**读**:写入登录状态(restore)归下面「Agent 能做什么」里的写入开关。桌面端请注意:Agent 驱动的是侧栏里那一个页面(人机同页),因此它与该页面共用同一个 partition —— 这也正是它能读到登录态的原因,属于有意接受的沙箱边界变化;关闭本项即拒绝读取。",
+    "actions.title": "Agent 能做什么",
+    "actions.lead": "与 dsh_browser_restrict 不同:那一层是模型自己设的软护栏,它随时可以解除;这里的三项由你在设置里决定,模型手里的工具改不了它们。",
+    "actions.allowExecute": "允许在页面里执行脚本",
+    "actions.allowExecute.hint": "dsh_browser_execute 能在当前页面里运行任意 JavaScript —— 它的能力上限就是这个页面能做的事。关闭后该工具一律被拒(BROWSER_EXECUTE_DISABLED),模型手里的工具没有一个能改这项设置。但也别把它当成锁:设置文档由本机 HTTP 端点读写,同源页面可以写它 —— 这不是凭据系统。",
+    "actions.allowDownload": "允许下载文件到磁盘",
+    "actions.allowDownload.hint": "dsh_browser_download 会把 URL 下载到 downloadDir 内(带登录态;仍需通过目录准入,不覆盖已有文件)。关闭后一律被拒(BROWSER_DOWNLOAD_DISABLED)。截图另存走的是同一套目录准入,不受此项影响。",
+    "actions.allowCredentialWrite": "允许写入登录状态",
+    "actions.allowCredentialWrite.hint": "dsh_browser_auth 的 restore 会向任意域写入 cookie。关闭后只能导出、不能导入(BROWSER_AUTH_WRITE_DISABLED);读取仍由上面「凭据」那一项控制。",
+  }
+
+  const en = {
+    nav: "Browser",
+    "watch.open": "Watch browser",
+    "watch.title": "Live view",
+    "watch.readOnly": "Read-only; clicks and typing are not forwarded",
+    "watch.stop": "Stop",
+    "watch.live": "Live",
+    "watch.paused": "Paused",
+    "watch.stopped": "Stopped",
+    "watch.connecting": "Connecting",
+    "watch.disconnected": "Disconnected",
+    "watch.disabled": "Remote viewing is off on the host",
+    "watch.noPage": "This task has not opened a browser",
+    "watch.bridgeStale": "A desktop update invalidated the bridge; re-run:",
+    "watch.bridgeMissing": "The desktop bridge is not installed, so the sidebar carrier cannot work:",
+    title: "Browser (Browser Use)",
+    lead: "Most settings apply immediately. Cookie persistence and headless mode apply only to installed Chrome / Edge; reselect the carrier or restart DSH after changing them.",
+    loading: "Loading settings…",
+    failed: "Could not load settings:",
+    retry: "Retry",
+    saved: "Saved",
+    path: "Settings file",
+    "history.title": "Browsing history",
+    "history.enabled": "Keep browsing history",
+    "history.hint": "Records visited pages so they can be found and reopened after the browser is closed; off means no new visits are recorded.",
+    "cookies.title": "Login state",
+    "cookies.persist": "Keep cookies",
+    "cookies.hint": "Controls only the separate Chrome / Edge profile: off uses a temporary profile on the next launch. Reselect the carrier or restart DSH. Bundled Electron and the desktop sidebar retain login state through their own carrier.",
+    "ui.title": "Presentation",
+    "ui.autoExpandOnce": "Auto-expand the side panel (once per task)",
+    "ui.autoExpandOnce.hint": "Expands when the agent first operates; after you collapse it, this task stays quiet.",
+    "ui.closeWithSession": "Close the browser when the session ends",
+    "ui.closeWithSession.hint": "Closing releases the browser process; history and login state survive.",
+    "ui.virtualCursor": "Show the synthetic cursor",
+    "ui.virtualCursor.hint": "Makes the agent's operating position visible (its presence means the agent has taken over that tab).",
+    "vision.title": "Vision strategy",
+    "vision.strategy": "Default strategy",
+    "vision.auto": "Auto (coordinates and semantics both allowed; for models that read images)",
+    "vision.nonVisual": "Non-visual only (coordinate clicks refused; locate via DOM / a11y tree)",
+    "vision.hint": "Under non-visual, a coordinate click is refused outright and the error says to use a semantic target — so nothing is clicked on a guessed position. DOM lookup, the accessibility tree, text extraction and structured scraping behave identically in both strategies: the whole page stays operable without image input.",
+    "credentials.title": "Credentials",
+    "credentials.allowRead": "Allow the agent to read cookies / export login state",
+    "browser.title": "Browser",
+    "browser.channel": "Which browser to use",
+  "browser.sidebar": "Sidebar browser (opens in the DSH window right pane; no extra window)",
+  "browser.bundled": "Bundled Electron (ships with the plugin, nothing to install)",
+    "browser.chrome": "Installed Chrome",
+    "browser.edge": "Installed Edge",
+    "browser.auto": "Automatic (Chrome first, then Edge)",
+    "browser.hint": "Choosing an installed browser launches it with a **separate profile**: your everyday windows, bookmarks and logins are never opened, locked or modified, and closing the plugin never closes your browser. The trade-off is that it does not see sites you are already signed into there — sign in once in that window and the session stays in the plugin's own profile. On the desktop the shell's sidebar normally carries the page; this setting outranks it.",
+    "credentials.hint": "Off makes dsh_browser_auth refuse the export, reporting BROWSER_AUTH_DISABLED — an export reads the machine-wide shared cookie jar (narrowed to the current page's site). It governs READING only: writing login state (restore) answers to the write switch under \"What the agent may do\" below. On the desktop, note that the agent drives the sidebar's own page (one page for both parties), so it shares that page's partition — which is exactly why it can reach the login state. That is a deliberate sandbox-boundary change; this switch is how you refuse it.",
+    "actions.title": "What the agent may do",
+    "actions.lead": "Unlike dsh_browser_restrict, which is the model's own soft guardrail and can be lifted by the model at any time, these three are yours: the model's own tools cannot change them.",
+    "actions.allowExecute": "Run scripts in the page",
+    "actions.allowExecute.hint": "dsh_browser_execute runs arbitrary JavaScript in the active tab — its reach is everything that page can do. Off refuses the tool outright (BROWSER_EXECUTE_DISABLED), and no tool the model holds can change this setting. Do not read that as a lock, though: the document is served over a local HTTP endpoint and a same-origin page can write it. This is not a credential system.",
+    "actions.allowDownload": "Download files to disk",
+    "actions.allowDownload.hint": "dsh_browser_download fetches a URL into downloadDir (with login state; still subject to the directory admission gate, never overwriting an existing file). Off refuses it outright (BROWSER_DOWNLOAD_DISABLED). Saving a screenshot goes through the same directory gate and is not covered by this switch.",
+    "actions.allowCredentialWrite": "Write login state",
+    "actions.allowCredentialWrite.hint": "dsh_browser_auth's restore writes cookies to arbitrary domains. Off allows export but not import (BROWSER_AUTH_WRITE_DISABLED); reading stays under the Credentials switch above.",
+  }
+
+  /** Read or patch the host-owned settings document. */
+  async function callSettings(patch) {
+    const response = await fetch(ROUTE, patch === undefined
+      ? { method: "GET", headers: { accept: "application/json" } }
+      : {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      })
+    const data = await response.json().catch(() => undefined)
+    if (data === undefined || data.ok !== true) {
+      throw new Error((data && data.error) || `HTTP ${response.status}`)
+    }
+    return data
+  }
+
+  /**
+   * The panel's own stylesheet.
+   *
+   * Inline styles cannot express `:hover`, and the rows need one — an interactive row with no
+   * feedback reads as decoration. The colours come from DSH's own design tokens
+   * (`--dsw-alias-*`, the same ones the host's settings rows use) so this follows the active
+   * theme instead of guessing at it; each has a literal fallback because a token may be absent
+   * under a third-party theme, and an unstyled row is worse than a slightly-off one.
+   */
+  const CSS = `
+.dsh-bb-row {
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: var(--dsw-alias-label-primary, inherit);
+  transition: background-color .12s ease;
+}
+/* No resting background: a permanent grey block behind every row reads as a set of buttons
+   rather than a list of settings. The highlight belongs to the pointer, not to the row. */
+.dsh-bb-row:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.15));
+}
+.dsh-bb-row:active {
+  background: var(--dsw-alias-interactive-bg-active, rgba(128,128,128,.22));
+}
+.dsh-bb-row:focus-within {
+  border-color: var(--dsw-alias-border-l2, rgba(128,128,128,.4));
+}
+/* The dropdown is drawn here rather than by the OS.
+   A native <select> paints its popup with system colours on Windows: the highlight overrides
+   whatever the option sets (white text on a white bar), and the list carries a border no CSS
+   can remove. Only the collapsed control is styleable, so a panel that matches its theme
+   everywhere else ends up with one control that does not. Everything below is ours: the
+   surface, the highlight, and the absence of that line. */
+.dsh-bb-dd {
+  position: relative;
+  display: inline-block;
+  margin-top: 4px;
+}
+.dsh-bb-dd-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 4px 8px 4px 9px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.4));
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-2, rgba(128,128,128,.12));
+  color: var(--dsw-alias-label-primary, inherit);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dsh-bb-dd-btn:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.18));
+}
+.dsh-bb-dd-btn:disabled { opacity: .55; cursor: default; }
+.dsh-bb-dd-caret { opacity: .6; font-size: 10px; line-height: 1; }
+.dsh-bb-dd-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  max-width: 340px;
+  padding: 4px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(128,128,128,.4));
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2, #2f2f2f);
+  box-shadow: 0 6px 20px rgba(0,0,0,.28);
+}
+.dsh-bb-dd-opt {
+  display: block;
+  width: 100%;
+  padding: 6px 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary, inherit);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+/* The same ellipse the rows use, so the panel reads as one surface — and it is ours to draw,
+   which is the whole reason this control exists. */
+.dsh-bb-dd-opt:hover,
+.dsh-bb-dd-opt[data-active="true"] {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.18));
+}
+.dsh-bb-dd-opt[aria-selected="true"] { font-weight: 600; }
+
+/* Live-view panel. Fixed layer rather than a slot: the host has no stable slot for an extra
+   surface over the conversation, and a layer works in every layout including a phone. */
+.dsh-bw-watch { position: fixed; right: 16px; bottom: 16px; z-index: 2147483000; font-family: inherit; }
+.dsh-bw-watch-open {
+  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  border: 1px solid var(--dsw-alias-border, rgba(128,128,128,.45)); border-radius: 999px;
+  padding: 7px 13px; font-size: 12px; color: inherit;
+  background: var(--dsw-alias-interactive-bg, rgba(128,128,128,.12));
+}
+.dsh-bw-watch-open:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.2)); }
+.dsh-bw-watch-dot { width: 7px; height: 7px; border-radius: 50%; background: #d9534f; }
+.dsh-bw-watch-panel {
+  position: absolute; right: 0; bottom: 40px; width: min(560px, calc(100vw - 32px));
+  border: 1px solid var(--dsw-alias-border, rgba(128,128,128,.35)); border-radius: 10px;
+  background: var(--dsw-alias-bg-elevated, #1b1b1f); color: inherit; overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+}
+.dsh-bw-watch-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; font-size: 12px; }
+.dsh-bw-watch-title { font-weight: 600; }
+.dsh-bw-watch-state { opacity: .7; margin-left: auto; }
+.dsh-bw-watch-close {
+  border: 0; background: transparent; color: inherit; cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 0 2px; opacity: .7;
+}
+.dsh-bw-watch-stage { background: #000; min-height: 120px; display: flex; align-items: center; justify-content: center; }
+.dsh-bw-watch-img { display: block; max-width: 100%; height: auto; }
+.dsh-bw-watch-note { margin: 0; padding: 24px 14px; font-size: 12px; opacity: .75; text-align: center; }
+.dsh-bw-watch-foot {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  font-size: 11px; border-top: 1px solid var(--dsw-alias-border, rgba(128,128,128,.25));
+}
+.dsh-bw-watch-readonly { opacity: .6; }
+.dsh-bw-watch-bridge { padding: 8px 10px; font-size: 11px; border-bottom: 1px solid var(--dsw-alias-border, rgba(128,128,128,.25)); background: rgba(217,83,79,.12); }
+.dsh-bw-watch-bridge-line { line-height: 1.5; }
+.dsh-bw-watch-bridge-cmd { display: block; margin-top: 5px; padding: 5px 7px; font-size: 11px; white-space: pre-wrap; word-break: break-all; background: rgba(0,0,0,.28); border-radius: 5px; }
+.dsh-bw-watch-stop {
+  margin-left: auto; cursor: pointer; font-size: 11px; padding: 4px 10px;
+  border: 1px solid var(--dsw-alias-border, rgba(128,128,128,.45)); border-radius: 6px;
+  background: transparent; color: inherit;
+}
+`
+
+  /** Install the stylesheet once, however many times the panel is mounted. */
+  function installStyles() {
+    if (typeof document === "undefined") return
+    if (document.getElementById("dsh-builtin-browser-styles") !== null) return
+    const tag = document.createElement("style")
+    tag.id = "dsh-builtin-browser-styles"
+    tag.textContent = CSS
+    document.head.appendChild(tag)
+  }
+
+  const styles = {
+    wrap: { display: "flex", flexDirection: "column", gap: "14px", padding: "4px 2px", fontSize: "13px" },
+    lead: { opacity: 0.75, lineHeight: 1.6, margin: 0 },
+    group: { border: "1px solid rgba(128,128,128,.28)", borderRadius: "8px", padding: "10px 12px" },
+    groupTitle: { margin: "0 0 8px", fontSize: "13px", fontWeight: 600 },
+    row: { display: "flex", gap: "10px", alignItems: "flex-start" },
+    box: { marginTop: "2px" },
+    label: { display: "flex", flexDirection: "column", gap: "2px", cursor: "pointer" },
+    hint: { opacity: 0.68, lineHeight: 1.5 },
+    status: { opacity: 0.7, minHeight: "18px" },
+    error: { color: "#e5534b" },
+    pathLine: { opacity: 0.6, wordBreak: "break-all", lineHeight: 1.5 },
+    button: { padding: "3px 10px", borderRadius: "6px", border: "1px solid rgba(128,128,128,.4)", background: "transparent", color: "inherit", cursor: "pointer" },
+  }
+
+  /**
+   * A dropdown drawn by this panel rather than by the operating system.
+   *
+   * Replaces a native `<select>`, whose popup Windows paints with system colours: the hover
+   * highlight overrode the option's background (white text on a white bar) and the list carried
+   * a border no CSS could remove. Both are unfixable from outside the control, and this panel's
+   * two dropdowns were the only places it did not match its own theme.
+   *
+   * Keyboard and assistive-technology behaviour is reimplemented rather than inherited, which is
+   * the cost of owning the rendering: Up/Down move, Enter/Space commit, Escape closes and
+   * returns focus, Home/End jump, clicking outside closes.
+   */
+  function Dropdown(props) {
+    const [open, setOpen] = useState(false)
+    // Index the keyboard has moved to; -1 means "the selected value, unless the user moved".
+    const [active, setActive] = useState(-1)
+    const rootRef = useRef(null)
+    const buttonRef = useRef(null)
+
+    const selected = props.options.findIndex(option => option.value === props.value)
+    const current = props.options[selected] ?? props.options[0]
+
+    useEffect(() => {
+      if (!open) return undefined
+      const away = event => {
+        if (rootRef.current !== null && !rootRef.current.contains(event.target)) setOpen(false)
+      }
+      document.addEventListener("mousedown", away)
+      return () => document.removeEventListener("mousedown", away)
+    }, [open])
+
+    const commit = index => {
+      const option = props.options[index]
+      if (option === undefined) return
+      setOpen(false)
+      setActive(-1)
+      buttonRef.current?.focus()
+      if (option.value !== props.value) props.onChange(option.value)
+    }
+
+    const onKeyDown = event => {
+      if (event.key === "Escape") {
+        if (open) { event.preventDefault(); setOpen(false); buttonRef.current?.focus() }
+        return
+      }
+      if (!open && (event.key === "Enter" || event.key === " " || event.key === "ArrowDown")) {
+        event.preventDefault()
+        setOpen(true)
+        setActive(selected >= 0 ? selected : 0)
+        return
+      }
+      if (!open) return
+      const last = props.options.length - 1
+      if (event.key === "ArrowDown") { event.preventDefault(); setActive(a => Math.min(last, (a < 0 ? selected : a) + 1)) }
+      else if (event.key === "ArrowUp") { event.preventDefault(); setActive(a => Math.max(0, (a < 0 ? selected : a) - 1)) }
+      else if (event.key === "Home") { event.preventDefault(); setActive(0) }
+      else if (event.key === "End") { event.preventDefault(); setActive(last) }
+      else if (event.key === "Enter" || event.key === " ") { event.preventDefault(); commit(active < 0 ? selected : active) }
+    }
+
+    return h("div", { key: "s", className: "dsh-bb-dd", ref: rootRef }, [
+      h("button", {
+        key: "b",
+        type: "button",
+        ref: buttonRef,
+        className: "dsh-bb-dd-btn",
+        disabled: props.disabled,
+        "aria-haspopup": "listbox",
+        "aria-expanded": open ? "true" : "false",
+        onClick: () => { setOpen(o => !o); setActive(-1) },
+        onKeyDown,
+      }, [
+        h("span", { key: "v" }, current === undefined ? "" : current.label),
+        h("span", { key: "c", className: "dsh-bb-dd-caret", "aria-hidden": "true" }, "\\u25be"),
+      ]),
+      open ? h("div", {
+        key: "l",
+        className: "dsh-bb-dd-list",
+        role: "listbox",
+        "aria-label": props.label,
+      }, props.options.map((option, index) => h("button", {
+        key: option.value,
+        type: "button",
+        className: "dsh-bb-dd-opt",
+        role: "option",
+        "aria-selected": option.value === props.value ? "true" : "false",
+        "data-active": index === active ? "true" : "false",
+        onMouseEnter: () => setActive(index),
+        onClick: () => commit(index),
+      }, option.label))) : null,
+    ])
+  }
+
+  /** One boolean switch bound to a settings path. */
+  function Toggle(props) {
+    const t = translate
+    return h("div", { style: styles.row, className: "dsh-bb-row" }, [
+      h("input", {
+        key: "i",
+        type: "checkbox",
+        style: styles.box,
+        checked: props.checked,
+        disabled: props.busy,
+        onChange: event => props.onChange(event.target.checked),
+      }),
+      h("label", { key: "l", style: styles.label, onClick: () => props.onChange(!props.checked) }, [
+        h("span", { key: "t" }, t(props.labelKey)),
+        h("span", { key: "h", style: styles.hint }, t(props.hintKey)),
+      ]),
+    ])
+  }
+
+  /** The settings page section. */
+  function SettingsRoot() {
+    const t = translate
+    const [rawSettings, setSettings] = useState(null)
+    const [meta, setMeta] = useState({ path: "" })
+    const [error, setError] = useState("")
+    const [busy, setBusy] = useState(false)
+    const [saved, setSaved] = useState(false)
+
+    const load = useCallback(() => {
+      setError("")
+      callSettings().then(data => {
+        setSettings(data.settings)
+        setMeta({ path: data.path || "" })
+      }).catch(failure => setError(String(failure && failure.message ? failure.message : failure)))
+    }, [])
+
+    useEffect(() => { load() }, [load])
+
+    const patch = useCallback(next => {
+      setBusy(true)
+      setError("")
+      callSettings(next).then(data => {
+        setSettings(data.settings)
+        setSaved(true)
+        setTimeout(() => setSaved(false), 1200)
+      }).catch(failure => setError(String(failure && failure.message ? failure.message : failure)))
+        .then(() => setBusy(false))
+    }, [])
+
+    if (rawSettings === null) {
+      return h("div", { style: styles.wrap }, [
+        h("p", { key: "l", style: styles.lead }, t("loading")),
+        error !== "" ? h("p", { key: "e", style: styles.error }, `${t("failed")} ${error}`) : null,
+      ])
+    }
+
+    // A document served by an OLDER host has no `actions` section — which is exactly the state
+    // an update leaves behind when the host has not been restarted yet (the client bundle is
+    // read at request time, the host's code at startup). Rendering `settings.actions.allowExecute`
+    // off that threw, and the throw took the whole panel with it: the section did not merely show
+    // stale values, it refused to open. Fill the gap with the defaults an older host behaves by,
+    // which is also the honest reading — it has no such switch, so "on" is what it does.
+    const settings = rawSettings.actions === undefined
+      ? { ...rawSettings, actions: { allowExecute: true, allowDownload: true, allowCredentialWrite: true } }
+      : rawSettings
+
+    const section = (titleKey, children) => h("div", { key: titleKey, style: styles.group }, [
+      h("p", { key: "t", style: styles.groupTitle }, t(titleKey)),
+      ...children,
+    ])
+
+    return h("div", { style: styles.wrap }, [
+      h("p", { key: "lead", style: styles.lead }, t("lead")),
+
+      section("history.title", [
+        h(Toggle, {
+          key: "enabled",
+          labelKey: "history.enabled",
+          hintKey: "history.hint",
+          checked: settings.history.enabled,
+          busy,
+          onChange: value => patch({ history: { enabled: value } }),
+        }),
+      ]),
+
+      section("cookies.title", [
+        h(Toggle, {
+          key: "persist",
+          labelKey: "cookies.persist",
+          hintKey: "cookies.hint",
+          checked: settings.cookies.persist,
+          busy,
+          onChange: value => patch({ cookies: { persist: value } }),
+        }),
+      ]),
+
+      section("ui.title", [
+        h(Toggle, {
+          key: "autoExpandOnce",
+          labelKey: "ui.autoExpandOnce",
+          hintKey: "ui.autoExpandOnce.hint",
+          checked: settings.ui.autoExpandOnce,
+          busy,
+          onChange: value => patch({ ui: { autoExpandOnce: value } }),
+        }),
+        h(Toggle, {
+          key: "closeWithSession",
+          labelKey: "ui.closeWithSession",
+          hintKey: "ui.closeWithSession.hint",
+          checked: settings.ui.closeWithSession,
+          busy,
+          onChange: value => patch({ ui: { closeWithSession: value } }),
+        }),
+        h(Toggle, {
+          key: "virtualCursor",
+          labelKey: "ui.virtualCursor",
+          hintKey: "ui.virtualCursor.hint",
+          checked: settings.ui.virtualCursor,
+          busy,
+          onChange: value => patch({ ui: { virtualCursor: value } }),
+        }),
+      ]),
+
+      section("vision.title", [
+        h("div", { key: "row", style: styles.row, className: "dsh-bb-row" }, [
+          h("label", { key: "l", style: styles.label }, [
+            h("span", { key: "t" }, t("vision.strategy")),
+            h(Dropdown, {
+              key: "s",
+              label: t("vision.strategy"),
+              value: settings.vision.strategy,
+              disabled: busy,
+              onChange: value => patch({ vision: { strategy: value } }),
+              options: [
+                { value: "auto", label: t("vision.auto") },
+                { value: "nonVisual", label: t("vision.nonVisual") },
+              ],
+            }),
+            h("span", { key: "h", style: styles.hint }, t("vision.hint")),
+          ]),
+        ]),
+      ]),
+
+      section("browser.title", [
+        h("div", { key: "row", style: styles.row, className: "dsh-bb-row" }, [
+          h("label", { key: "l", style: styles.label }, [
+            h("span", { key: "t" }, t("browser.channel")),
+            h(Dropdown, {
+              key: "s",
+              label: t("browser.channel"),
+              value: settings.browser.channel,
+              disabled: busy,
+              onChange: value => patch({ browser: { channel: value } }),
+              options: [
+                { value: "sidebar", label: t("browser.sidebar") },
+                { value: "bundled", label: t("browser.bundled") },
+                { value: "auto", label: t("browser.auto") },
+                { value: "chrome", label: t("browser.chrome") },
+                { value: "edge", label: t("browser.edge") },
+              ],
+            }),
+            h("span", { key: "h", style: styles.hint }, t("browser.hint")),
+          ]),
+        ]),
+      ]),
+
+      section("actions.title", [
+        h("p", { key: "lead", style: styles.hint }, t("actions.lead")),
+        h(Toggle, {
+          key: "allowExecute",
+          labelKey: "actions.allowExecute",
+          hintKey: "actions.allowExecute.hint",
+          checked: settings.actions.allowExecute,
+          busy,
+          onChange: value => patch({ actions: { allowExecute: value } }),
+        }),
+        h(Toggle, {
+          key: "allowDownload",
+          labelKey: "actions.allowDownload",
+          hintKey: "actions.allowDownload.hint",
+          checked: settings.actions.allowDownload,
+          busy,
+          onChange: value => patch({ actions: { allowDownload: value } }),
+        }),
+        h(Toggle, {
+          key: "allowCredentialWrite",
+          labelKey: "actions.allowCredentialWrite",
+          hintKey: "actions.allowCredentialWrite.hint",
+          checked: settings.actions.allowCredentialWrite,
+          busy,
+          onChange: value => patch({ actions: { allowCredentialWrite: value } }),
+        }),
+      ]),
+
+      section("credentials.title", [
+        h(Toggle, {
+          key: "allowRead",
+          labelKey: "credentials.allowRead",
+          hintKey: "credentials.hint",
+          checked: settings.credentials.allowRead,
+          busy,
+          onChange: value => patch({ credentials: { allowRead: value } }),
+        }),
+      ]),
+
+      h("div", { key: "status", style: styles.status }, [
+        saved ? h("span", { key: "s" }, t("saved")) : null,
+        error !== "" ? h("span", { key: "e", style: styles.error }, ` ${t("failed")} ${error} `) : null,
+        error !== "" ? h("button", { key: "r", style: styles.button, onClick: load }, t("retry")) : null,
+      ]),
+
+      meta.path !== "" ? h("div", { key: "path", style: styles.pathLine }, `${t("path")}: ${meta.path}`) : null,
+    ])
+  }
+
+  // ===========================================================================
+  // Conversation panel service: the one place a sidebar panel is opened.
+  //
+  // The shell mounts one right sidebar per conversation, and DSH's own sidebar
+  // browser keeps that conversation's tabs and its webview guest inside it.
+  // `ctx.sidebarRight.openTab` acts on the conversation the shell is SHOWING
+  // (`mounted`), so every path that simulated a shortcut or clicked a card put
+  // the page into whichever conversation the human happened to be reading —
+  // that is the cross-conversation bleed, and it is a property of the path, not
+  // an accident of it.
+  //
+  // `openTabIn(sessionId, …)` is the same navigation aimed at a NAMED
+  // conversation, and it works for one that is not on screen. This service is
+  // the only caller; the plugin's host half reaches it by evaluating
+  // `globalThis.__dshBuiltinBrowser.openPanel(...)` inside the shell window, so
+  // no input event, no key dispatch and no element click is involved.
+  //
+  // Guest identity is read from the panel's own `<webview>` and only inside the
+  // subtree found for THAT conversation — never from the first match in the
+  // document, which belongs to somebody else's panel.
+  // ===========================================================================
+
+  /** The conversation a sidebar element belongs to, read off its React fiber. */
+  function sessionIdOfElement(element) {
+    const key = Object.keys(element).find(
+      name => name.startsWith("__reactFiber$") || name.startsWith("__reactInternalInstance$"),
+    )
+    if (key === undefined) return null
+    let fiber = element[key]
+    let depth = 0
+    while (fiber !== null && fiber !== undefined && depth < 60) {
+      const props = fiber.memoizedProps
+      if (props !== null && typeof props === "object" && typeof props.sessionId === "string") return props.sessionId
+      fiber = fiber.return
+      depth += 1
+    }
+    return null
+  }
+
+  /**
+   * This conversation's own sidebar strip, or null when the shell has not mounted it.
+   *
+   * Its presence is the precondition `openTabIn` needs: it is minted together with the
+   * conversation's surface store, and a call for a conversation whose store was never
+   * minted silently does nothing. Detecting it here turns that silence into a reason
+   * the caller can report, instead of a page that never appears.
+   */
+  function tabStripFor(sessionId) {
+    for (const strip of Array.from(document.querySelectorAll("[class*=_tabStrip]"))) {
+      if (sessionIdOfElement(strip) === sessionId) return strip
+    }
+    return null
+  }
+
+  /** rc.5 marks both SessionView and its nested SidebarPanel, including floating panes. */
+  function panelRootsFor(sessionId) {
+    const roots = Array.from(document.querySelectorAll("[data-sidebar-right-session]"))
+    // Only shells without DOM ownership markers may use the legacy React adapter.
+    return roots.length === 0 ? undefined : roots.filter(root => root.getAttribute("data-sidebar-right-session") === sessionId)
+  }
+
+  /**
+   * Every live `<webview>` guest inside this conversation's panel subtree.
+   *
+   * The walk up stops the moment an ancestor carries ANOTHER conversation's sidebar, and that stop
+   * condition is the whole point of this function. The shell mounts every conversation's panel in
+   * the same document — hidden ones included — so one step too far lands on a subtree that holds
+   * all of them, and the first guest found there belongs to whichever conversation the shell
+   * happens to render first. Measured: a GitHub login page opened in a different conversation was
+   * reported as this one's guest, which is the cross-conversation bleed this service exists to
+   * prevent. A sibling strip is the exact, class-name-independent signature of having stepped
+   * outside; a conversation may legitimately own more than one strip of its own, so the test is
+   * "is there one that is NOT mine", never a count.
+   */
+  function guestsInPanel(sessionId) {
+    const roots = panelRootsFor(sessionId)
+    if (roots !== undefined) {
+      // The nested markers can enumerate a guest twice. Its closest owner must still
+      // name this session, so an embedded foreign session never enters the result.
+      return Array.from(new Set(roots.flatMap(root => Array.from(root.querySelectorAll("webview"))))).filter(view => {
+        try {
+          return roots.includes(view.closest("[data-sidebar-right-session]"))
+            && typeof view.getWebContentsId === "function" && view.getWebContentsId() > 0
+        } catch { return false }
+      })
+    }
+    const strip = tabStripFor(sessionId)
+    if (strip === null) return []
+    // Start at the strip itself: it is by construction this conversation's own, so the foreign test
+    // below cannot trip on it, and a shell that renders the guest as a sibling of the strip is
+    // still reached.
+    let node = strip
+    while (node !== null && node !== undefined && node !== document.body) {
+      const foreign = Array.from(node.querySelectorAll("[class*=_tabStrip]"))
+        .some(el => sessionIdOfElement(el) !== sessionId)
+      if (foreign) break
+      const found = Array.from(node.querySelectorAll("webview")).filter(view => {
+        try { return typeof view.getWebContentsId === "function" && view.getWebContentsId() > 0 }
+        catch (error) { return false }
+      })
+      if (found.length > 0) return found
+      node = node.parentElement
+    }
+    return []
+  }
+
+  /** Read this conversation's current guest, preferring the one actually drawn. */
+  function guestStateFor(sessionId) {
+    const roots = panelRootsFor(sessionId)
+    if (roots === undefined ? tabStripFor(sessionId) === null : roots.length === 0) return { panel: false, guestId: null, url: "" }
+    const guests = guestsInPanel(sessionId)
+    if (guests.length === 0) return { panel: true, guestId: null, url: "" }
+    // A sidebar keeps every tab mounted (`keepMounted`), so a background tab's guest is
+    // in the tree too. Prefer the one with a drawn box; fall back to the newest.
+    const drawn = guests.find(view => {
+      const rect = view.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0
+    })
+    const chosen = drawn === undefined ? guests[guests.length - 1] : drawn
+    let url = ""
+    try { url = String(chosen.getURL ? chosen.getURL() : "") } catch (error) { url = "" }
+    try { return { panel: true, guestId: chosen.getWebContentsId(), url } }
+    catch (error) { return { panel: true, guestId: null, url: "" } }
+  }
+
+  /** Resolve a shell tab by its stable id, never by the page's displayed title. */
+  function tabIdOfElement(element, allowed, roots) {
+    if (roots !== undefined) {
+      const owner = element.closest("[data-sidebar-right-session]")
+      if (!roots.includes(owner)) return null
+      let id = null
+      for (let node = element; node && node !== owner; node = node.parentElement) {
+        for (const value of [node.getAttribute("data-sidebar-right-tab"), node.getAttribute("data-dockkit-tab")]) {
+          if (value === null) continue
+          if (id !== null && id !== value) return null
+          id = value
+        }
+      }
+      return allowed.has(id) ? id : null
+    }
+    const key = Object.keys(element).find(name => name.startsWith("__reactFiber$") || name.startsWith("__reactInternalInstance$"))
+    let fiber = key === undefined ? null : element[key]
+    for (let depth = 0; fiber && depth < 60; depth += 1, fiber = fiber.return) {
+      const props = fiber.memoizedProps
+      if (!props || typeof props !== "object") continue
+      for (const id of [props.tabId, props.tab && props.tab.id]) {
+        if (typeof id === "string" && allowed.has(id)) return id
+      }
+    }
+    return null
+  }
+
+  /**
+   * Publish the service every host-side panel request goes through.
+   *
+   * The binding is separate from the publication so the API exists from the first
+   * apply — a request arriving before `sidebarRight` is ready gets a named reason
+   * rather than a missing global, which is indistinguishable from a bridge that
+   * never loaded.
+   */
+  function installPanelService(ctx) {
+    let sidebarRight = null
+    /** The shell's own navigation service: `openSession` is how it is asked to DISPLAY a conversation. */
+    let uiWorkspace = null
+    // `inject` is how a client plugin waits for a service to appear. A host that does not offer it
+    // — an older composition, or a harness that mounted this bundle for its settings panel alone —
+    // must still get the panel, so the wait is skipped and the published API names the missing
+    // service when it is called. Failing the whole apply here would take the settings panel down
+    // with it, which is exactly the shape of regression this file has been bitten by before.
+    if (typeof ctx.inject === "function") {
+      ctx.inject(["sidebarRight"], (scope) => {
+        sidebarRight = scope.sidebarRight
+        scope.effect(() => () => {
+          if (sidebarRight === scope.sidebarRight) sidebarRight = null
+        }, "dsh-builtin-browser: conversation panel binding")
+      })
+      // A separate inject, deliberately: waiting for both services in one call would take the
+      // panel down on a host that has the sidebar but not the workspace service (an older
+      // composition), and the panel is the part that must keep working.
+      ctx.inject(["uiWorkspace"], (scope) => {
+        uiWorkspace = scope.uiWorkspace
+        scope.effect(() => () => {
+          if (uiWorkspace === scope.uiWorkspace) uiWorkspace = null
+        }, "dsh-builtin-browser: workspace binding")
+      })
+    }
+    /**
+     * Ask the shell to DISPLAY the conversation a page was requested for.
+     *
+     * The shell renders the sidebar of the conversation it shows and no other, so a request from a
+     * background conversation can place a tab but never grow a webview. The old answer was "show
+     * that conversation and the page appears" — true, and a dependency on the human's timing.
+     * `openSession` is the shell's own navigation for exactly this: the same call its own session
+     * list makes, aimed at a session id, with no input event and no DOM touched.
+     *
+     * Only called when this conversation's panel DOM is absent, so it never fires for the
+     * conversation the human is already reading, and never as a side effect of a read.
+     *
+     * @param sessionId - the conversation the page belongs to.
+     * @param state - the panel read taken just before; `panel: true` means nothing to claim.
+     * @returns whether the shell was asked to switch.
+     */
+    /**
+     * The conversation the shell is displaying, as the shell itself reports it.
+     *
+     * `undefined`/`null` means "the shell would not say" — an older shell, or one whose surface was
+     * never minted. Both callers treat that as "not this conversation", which is the fail-safe
+     * direction: no navigation, no expand, nothing that could move a view it cannot identify.
+     * @returns the on-screen session id, or null.
+     */
+    function onScreenSession() {
+      try {
+        const screen = sidebarRight === null || typeof sidebarRight.screen !== "function" ? undefined : sidebarRight.screen()
+        return screen !== undefined && screen !== null && typeof screen.sessionId === "string" ? screen.sessionId : null
+      } catch (error) {
+        return null
+      }
+    }
+
+    function claimConversation(sessionId, state) {
+      if (state.panel === true) return false
+      if (uiWorkspace === null || typeof uiWorkspace.openSession !== "function") return false
+      // Already displayed? Then the shell needs no navigation: the panel simply has not been opened
+      // yet, and `revealPlacedPanel` opens it. Re-opening the conversation a human is reading would
+      // be a no-op at best and a view reset at worst.
+      if (onScreenSession() === sessionId) return false
+      try {
+        uiWorkspace.openSession(sessionId)
+        return true
+      } catch (error) {
+        return false
+      }
+    }
+
+    /**
+     * Make a page that has been PLACED actually appear: expand the column, focus its tab.
+     *
+     * A placed tab is not a shown page. The shell renders the body of the ACTIVE tab, and only
+     * while the column is expanded. A collapsed column keeps the strip — so the read side still
+     * reports `panel: true` — while no `<webview>` is ever created, and every guest read comes
+     * back empty. That is the state that used to sit here for 20 s and then get reported as an
+     * unusable panel: measured on the running shell as `panel: true`, `guestId: null` in the
+     * renderer and `sidebar: []` from the bridge, with no carrier-side step that could have
+     * fixed it, because nobody had ever asked the column to open.
+     *
+     * Both calls are layout commands on a conversation's own surface store — no input event, no
+     * key dispatch, no element click. Two guards keep them from touching a conversation the
+     * human is not reading:
+     *   - only when `screen()` names THIS conversation. `screen()` is the shell's own answer to
+     *     "which conversation is displayed", and `toggleExpanded` acts on exactly that one, so
+     *     without this check an expand could fold the column a human is reading. A conversation
+     *     that is displayed but was never opened (a fresh window has no right sidebar at all until
+     *     something asks for it) passes this check — that case is why the DOM alone is not enough;
+     *   - `focus` is scoped by the shell itself (a tab outside the mounted surface is ignored),
+     *     so passing it a tab id from another conversation's list cannot move that view.
+     *
+     * @param sessionId - the conversation whose page was just placed.
+     * @param state - what the panel read before the placement; a live guest means nothing to do.
+     * @returns what was asked for, so a caller can tell "expanded" from "already visible", and
+     *   `displayed` so it can tell "the shell is showing this conversation" from "it is not".
+     */
+    function revealPlacedPanel(sessionId, state) {
+      if (state.guestId !== null || sidebarRight === null) return {}
+      const done = {}
+      // Which conversation is the shell DISPLAYING? `screen()` answers it, and it is the question
+      // that decides whether an expand call is safe: `toggleExpanded()` acts on the on-screen
+      // session, so calling it for any other conversation would fold the column a human is reading.
+      //
+      // It also separates two states that the DOM alone cannot:
+      //   - this conversation is displayed but its column has never been opened (a fresh window
+      //     starts with no right sidebar at all) — expand, and the panel mounts;
+      //   - another conversation is displayed — nothing here may touch the column; the claim step
+      //     is what moves the shell, and the caller retries one render later.
+      let onScreen = null
+      try {
+        onScreen = onScreenSession()
+      } catch (error) {
+        onScreen = null
+      }
+      if (onScreen !== sessionId) {
+        done.displayed = false
+        return done
+      }
+      done.displayed = true
+      try {
+        if (typeof sidebarRight.isExpanded === "function" && typeof sidebarRight.toggleExpanded === "function") {
+          // `isExpanded()` is false both for "folded" and for "never opened". Both want the same
+          // thing here, and `screen()` above has already established that the column being toggled
+          // is THIS conversation's, so expanding cannot touch anybody else's.
+          if (sidebarRight.isExpanded() === false) {
+            sidebarRight.toggleExpanded()
+            done.expanded = true
+          }
+        }
+      } catch (error) {
+        done.expandError = String(error?.message ?? error)
+      }
+      try {
+        const tabs = typeof sidebarRight.tabsIn === "function" ? sidebarRight.tabsIn(sessionId) : []
+        const page = Array.isArray(tabs) ? tabs.find(entry => entry !== null && typeof entry === "object" && entry.kind === "browser") : undefined
+        if (page !== undefined && typeof sidebarRight.focus === "function") {
+          sidebarRight.focus(page.id)
+          done.focused = String(page.id)
+        }
+      } catch (error) {
+        done.focusError = String(error?.message ?? error)
+      }
+      return done
+    }
+
+    const api = {
+      /** @returns what happened: an existing guest, a newly opened tab, or a named refusal. */
+      openPanel(sessionId, url) {
+        const wanted = typeof sessionId === "string" ? sessionId : ""
+        if (!/^session-/.test(wanted)) {
+          return { ok: false, reason: "not a conversation id: " + JSON.stringify(sessionId), panel: false, guestId: null }
+        }
+        if (sidebarRight === null || typeof sidebarRight.openTabIn !== "function") {
+          return { ok: false, reason: "the shell's sidebar service is not available", panel: false, guestId: null }
+        }
+        const state = guestStateFor(wanted)
+        if (state.guestId !== null) {
+          return { ok: true, created: false, panel: true, guestId: state.guestId, url: state.url }
+        }
+        // No panel DOM for this conversation means the shell is not DISPLAYING it, and no tab placed
+        // here can ever grow a webview: the shell renders one sidebar, for the conversation it shows.
+        // Asking the human to click over was the old answer, and it made a working carrier depend on
+        // their timing. Ask the shell instead — `openSession` is its own navigation, one call on its
+        // own workspace service, no input events — and report `switched` so the caller can retry one
+        // render later instead of reporting a dead carrier.
+        const switched = claimConversation(wanted, state)
+        // A mounted panel is NOT required to place a tab.
+        //
+        // `openTabIn` acts on the conversation's own surface store, and the sidebar-right service
+        // keeps one for every conversation the shell has shown — "reaches any session's store by
+        // id … on screen or not". What a DISPLAYED conversation adds is the DOM to read the guest
+        // back out of, which is a separate question. So the tab is placed either way, and `tabsIn`
+        // (a public method) is what says whether it actually landed: `openTabIn` SILENTLY ignores a
+        // conversation whose store was never minted, and a silent no-op must never be reported as
+        // success.
+        let before = 0
+        try { before = sidebarRight.tabsIn(wanted).length } catch (error) { before = 0 }
+        try {
+          sidebarRight.openTabIn(wanted, "browser", url ? { params: { url: String(url) } } : {})
+        } catch (error) {
+          return { ok: false, reason: String((error && error.message) || error), panel: state.panel, guestId: null }
+        }
+        let placed = 0
+        try { placed = sidebarRight.tabsIn(wanted).length } catch (error) { placed = before }
+        // `openTabIn` DEDUPLICATES, so "the count grew" is the wrong test for "is this
+        // conversation's surface mounted".
+        //
+        // Placing a page kind the conversation already holds leaves the count unchanged — the shell
+        // reveals the tab it has. Testing for growth therefore reported a conversation that already
+        // held the page as UNMOUNTED, and refused to drive a page that was right there: that is the
+        // "it will not reopen what it already opened" behaviour, and it bites hardest on the second
+        // open of an address, which is exactly when a human expects a fast answer.
+        //
+        // A count that started at zero and stayed there is the real signature of a surface the
+        // shell has never minted, because that is the only case where `openTabIn` is a silent no-op.
+        if (placed <= before && before === 0) {
+          // Name what was FOUND, not just what was missing: "no panel" has two very different
+          // causes — the shell has mounted no sidebar for this conversation (nothing this side can
+          // do), or it writes its session id somewhere this lookup does not read (fixable) — and a
+          // refusal that says only "not mounted" cannot tell them apart.
+          const strips = Array.from(document.querySelectorAll("[class*=_tabStrip]"))
+          return {
+            ok: false,
+            reason: "this conversation's sidebar is not mounted, so a panel cannot be opened in it",
+            panel: state.panel,
+            guestId: null,
+            ...switched ? { switched: true } : {},
+            found: {
+              wanted: wanted,
+              strips: strips.length,
+              owners: strips.slice(0, 8).map(strip => sessionIdOfElement(strip)),
+              reactKeys: strips.length === 0 ? [] : Object.keys(strips[0]).filter(key => key.startsWith("__react")).slice(0, 4),
+            },
+          }
+        }
+        // Placing is not showing: ask the shell to expand the column and focus that tab, so the
+        // body (and with it the `<webview>`) actually gets created. Without this the caller polls
+        // a panel that can never answer, which is exactly what "produced no page" used to mean.
+        const revealed = revealPlacedPanel(wanted, state)
+        return {
+          ok: true,
+          created: placed > before,
+          panel: state.panel,
+          guestId: null,
+          tabs: placed,
+          ...switched ? { switched: true } : {},
+          ...revealed,
+        }
+      },
+      /** Read-only: this conversation's current guest, if it has one. */
+      panelGuest(sessionId) {
+        return guestStateFor(typeof sessionId === "string" ? sessionId : "")
+      },
+      /** All guest ids verified inside this conversation, including shell-created popup tabs. */
+      panelGuests(sessionId) {
+        if (typeof sessionId !== "string" || !/^session-/.test(sessionId)) return []
+        return guestsInPanel(sessionId).map(view => view.getWebContentsId())
+      },
+      /** Close exactly the tab hosting this guest. An unknown shell shape must fail closed. */
+      closePanelGuest(sessionId, guestId) {
+        const refuse = reason => ({ ok: false, reason, closed: 0 })
+        if (typeof sessionId !== "string" || !/^session-/.test(sessionId)) return refuse("a conversation id is required")
+        const view = guestsInPanel(sessionId).find(candidate => candidate.getWebContentsId() === guestId)
+        if (view === undefined) return refuse("the guest does not belong to this conversation panel")
+        const roots = panelRootsFor(sessionId)
+        const containers = roots === undefined ? [tabStripFor(sessionId)].filter(Boolean) : roots
+        if (containers.length === 0 || sidebarRight === null || typeof sidebarRight.tabsIn !== "function") {
+          return refuse("the shell cannot identify its tabs; refresh or upgrade the browser plugin client")
+        }
+        let tabs
+        try { tabs = sidebarRight.tabsIn(sessionId) } catch { return refuse("the conversation tabs are unavailable") }
+        const allowed = new Set(tabs.map(tab => tab.id))
+        const id = tabIdOfElement(view, allowed, roots)
+        if (id === null) return refuse("the shell does not expose this guest's tab identity; refresh or upgrade the desktop")
+        // rc.5's scoped controller runs registered cleanup and removes the shell tab as one action.
+        if (typeof sidebarRight.closeIn === "function") {
+          try {
+            sidebarRight.closeIn(sessionId, id)
+            if (sidebarRight.tabsIn(sessionId).some(tab => tab.id === id)) return refuse("the shell did not remove the requested conversation tab")
+            return { ok: true, closed: 1 }
+          } catch (error) { return refuse("the shell could not close the conversation tab: " + String(error?.message ?? error)) }
+        }
+        const headers = Array.from(new Set(containers.flatMap(container => Array.from(container.querySelectorAll("[role=tab]")))))
+          .filter(tab => tabIdOfElement(tab, allowed, roots) === id)
+        if (headers.length !== 1) return refuse("the shell does not expose one matching tab control; refresh or upgrade the desktop")
+        const buttons = Array.from(headers[0].querySelectorAll("button"))
+          .filter(button => /关闭|close/i.test((button.getAttribute("aria-label") || "") + " " + (button.getAttribute("title") || "")))
+        if (buttons.length !== 1) return refuse("the shell does not expose one matching close control; refresh or upgrade the desktop")
+        buttons[0].click()
+        return { ok: true, closed: 1 }
+      },
+    }
+    ctx.effect(() => {
+      globalThis.__dshBuiltinBrowser = api
+      return () => {
+        if (globalThis.__dshBuiltinBrowser === api) delete globalThis.__dshBuiltinBrowser
+      }
+    }, "dsh-builtin-browser: conversation panel service")
+  }
+
+  /**
+   * The live-view panel: one frame at a time, for an operator who is not sitting at this machine.
+   *
+   * A plain floating layer rather than a slot registration, deliberately. The host's layout has no
+   * stable slot for "an extra surface over the conversation", and inventing one would tie this
+   * panel to a layout that changes; a fixed layer works in every layout including a phone. It is
+   * also entirely inert until the host turns `remoteView.enabled` on, which the sessions probe
+   * reports.
+   *
+   * Pulls one frame per request and waits for it to paint before asking for the next, so a slow
+   * link shows fewer frames instead of queueing them. Nothing here retries in a tight loop: a
+   * refusal or a 503 moves the panel to a paused state, and it resumes on the next user action.
+   * @param ctx - the plugin context, for the disposal hook.
+   */
+  function installWatchPanel(ctx) {
+    if (typeof document === "undefined") return
+    const SESSIONS = "/dsh-builtin-browser/browser-view/sessions"
+    const FRAME = "/dsh-builtin-browser/browser-view/frame"
+    const MIN_INTERVAL_MS = 500
+
+    // Built element by element and referenced directly, never through innerHTML + querySelector.
+    // Two reasons: the host's test sandbox provides a minimal `createElement`, and re-parsing markup
+    // to find elements this code just made is work without a purpose.
+    const make = (tag, className, text) => {
+      const node = document.createElement(tag)
+      if (className !== undefined) node.className = className
+      if (text !== undefined) node.textContent = text
+      return node
+    }
+
+    const layer = make("div", "dsh-bw-watch")
+    layer.setAttribute("data-dsh-bw-watch", "")
+
+    const openButton = make("button", "dsh-bw-watch-open")
+    openButton.setAttribute("type", "button")
+    const dot = make("span", "dsh-bw-watch-dot")
+    const openLabel = make("span", "dsh-bw-watch-label")
+    openButton.appendChild(dot)
+    openButton.appendChild(openLabel)
+
+    const panel = make("section", "dsh-bw-watch-panel")
+    panel.hidden = true
+
+    const head = make("header", "dsh-bw-watch-head")
+    const title = make("span", "dsh-bw-watch-title")
+    const state = make("span", "dsh-bw-watch-state")
+    const closeButton = make("button", "dsh-bw-watch-close", "×")
+    closeButton.setAttribute("type", "button")
+    head.appendChild(title)
+    head.appendChild(state)
+    head.appendChild(closeButton)
+
+    const stage = make("div", "dsh-bw-watch-stage")
+    const img = make("img", "dsh-bw-watch-img")
+    img.hidden = true
+    const note = make("p", "dsh-bw-watch-note")
+    stage.appendChild(img)
+    stage.appendChild(note)
+
+    const foot = make("footer", "dsh-bw-watch-foot")
+    const readonlyLabel = make("span", "dsh-bw-watch-readonly")
+    const stopButton = make("button", "dsh-bw-watch-stop")
+    stopButton.setAttribute("type", "button")
+    foot.appendChild(readonlyLabel)
+    foot.appendChild(stopButton)
+
+    panel.appendChild(head)
+    panel.appendChild(stage)
+    panel.appendChild(foot)
+    layer.appendChild(openButton)
+    layer.appendChild(panel)
+    document.body.appendChild(layer)
+
+    /** Localized text, falling back to the key so a missing entry is visible rather than blank. */
+    const say = key => {
+      try { return translate(key) } catch { return key }
+    }
+    openLabel.textContent = say("watch.open")
+    title.textContent = say("watch.title")
+    readonlyLabel.textContent = say("watch.readOnly")
+    stopButton.textContent = say("watch.stop")
+    openButton.title = say("watch.open")
+
+    /** One running view: a session, its frames, and whether it should keep pulling. */
+    const view = { session: undefined, timer: undefined, running: false, lastAt: 0, objectUrl: undefined }
+
+    const setState = text => { state.textContent = text }
+    const showNote = text => {
+      note.textContent = text
+      note.hidden = false
+      img.hidden = true
+    }
+    /** Release the previous frame. A viewer that keeps every frame is a memory leak in a phone browser. */
+    const dropFrame = () => {
+      if (view.objectUrl !== undefined) {
+        URL.revokeObjectURL(view.objectUrl)
+        view.objectUrl = undefined
+      }
+    }
+    const stop = () => {
+      view.running = false
+      if (view.timer !== undefined) { clearTimeout(view.timer); view.timer = undefined }
+      dropFrame()
+      img.removeAttribute("src")
+      img.hidden = true
+      setState(say("watch.stopped"))
+      showNote(say("watch.stopped"))
+      panel.hidden = true
+    }
+
+    /** Ask which sessions exist; returns whether watching is enabled at all. */
+    const probe = async () => {
+      try {
+        const response = await fetch(SESSIONS, { headers: { accept: "application/json" } })
+        if (!response.ok) return { enabled: false, sessions: [] }
+        const data = await response.json()
+        return { enabled: data?.enabled === true, sessions: Array.isArray(data?.sessions) ? data.sessions : [] }
+      } catch {
+        return { enabled: false, sessions: [] }
+      }
+    }
+
+    /**
+     * Pull frames until stopped. One request in flight at a time, and the next one is scheduled only
+     * after the current image has painted — that is what makes a slow link degrade into fewer
+     * frames rather than a growing queue.
+     */
+    const pump = async () => {
+      if (!view.running) return
+      if (document.visibilityState === "hidden") {
+        // The design's rule: a hidden panel stops pulling immediately. Resuming is the user's
+        // action, not a timer's.
+        setState(say("watch.paused"))
+        showNote(say("watch.paused"))
+        view.timer = setTimeout(pump, MIN_INTERVAL_MS * 4)
+        return
+      }
+      const waited = Date.now() - view.lastAt
+      if (waited < MIN_INTERVAL_MS) {
+        view.timer = setTimeout(pump, MIN_INTERVAL_MS - waited)
+        return
+      }
+      view.lastAt = Date.now()
+      let nextDelay = MIN_INTERVAL_MS
+      try {
+        const url = `${FRAME}?session=${encodeURIComponent(String(view.session))}`
+        const response = await fetch(url, { headers: { accept: "image/jpeg" } })
+        if (!view.running) return
+        if (!response.ok) {
+          const body = await response.json().catch(() => undefined)
+          setState(say("watch.paused"))
+          showNote(body?.error === "remote-view-disabled"
+            ? say("watch.disabled")
+            : body?.error === "no-such-session"
+              ? say("watch.noPage")
+              : say("watch.paused"))
+          // Slower polling while paused: a paused view must not turn into a hot loop.
+          nextDelay = MIN_INTERVAL_MS * 4
+        } else {
+          const blob = await response.blob()
+          if (!view.running) return
+          const painted = new Promise(resolve => {
+            img.onload = () => resolve()
+            img.onerror = () => resolve()
+          })
+          dropFrame()
+          view.objectUrl = URL.createObjectURL(blob)
+          img.src = view.objectUrl
+          img.hidden = false
+          note.hidden = true
+          await painted
+          if (!view.running) return
+          setState(say("watch.live"))
+        }
+      } catch {
+        if (!view.running) return
+        setState(say("watch.disconnected"))
+        showNote(say("watch.disconnected"))
+        nextDelay = MIN_INTERVAL_MS * 4
+      }
+      if (view.running) view.timer = setTimeout(pump, nextDelay)
+    }
+
+    const start = async session => {
+      view.session = session
+      view.running = true
+      view.lastAt = 0
+      panel.hidden = false
+      setState(say("watch.connecting"))
+      showNote(say("watch.connecting"))
+      await pump()
+    }
+
+    openButton.addEventListener("click", () => {
+      void (async () => {
+        const found = await probe()
+        if (!found.enabled) { showNote(say("watch.disabled")); panel.hidden = false; return }
+        if (found.sessions.length === 0) { showNote(say("watch.noPage")); panel.hidden = false; return }
+        await start(found.sessions[0])
+      })()
+    })
+    closeButton.addEventListener("click", stop)
+    stopButton.addEventListener("click", stop)
+    // A panel hidden by a closed button must not keep pulling frames.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden" && view.running) {
+        if (view.timer !== undefined) { clearTimeout(view.timer); view.timer = undefined }
+        view.timer = setTimeout(pump, MIN_INTERVAL_MS)
+      }
+    })
+
+    ctx.effect(() => () => {
+      stop()
+      layer.remove()
+    }, "dsh-builtin-browser: live view panel")
+
+    /**
+     * Report the desktop bridge's install state next to the entry button.
+     *
+     * A missing bridge used to be a log line and nothing else, so a user on `channel: sidebar` saw
+     * "another window opened again" with no way to connect that to the actual cause (issue #36).
+     * The reading comes from the install tree, so it is true even before anything has been watched.
+     *
+     * The repair command is shown, never run: a page that could decide to close the desktop shell
+     * would be a worse problem than the one this line solves.
+     */
+    const showBridgeStatus = async () => {
+      let status
+      try {
+        const response = await fetch("/dsh-builtin-browser/bridge-status", { headers: { accept: "application/json" } })
+        if (!response.ok) return
+        const data = await response.json()
+        status = data?.bridge
+      } catch {
+        return
+      }
+      if (status === undefined) return
+      // Only the two states a user can act on: an installed bridge needs no notice, and a host
+      // without a desktop install has nothing to repair here.
+      if (status.state === "installed" || status.present !== true) return
+      const notice = make("div", "dsh-bw-watch-bridge")
+      const line = make("div", "dsh-bw-watch-bridge-line",
+        status.state === "stale" ? say("watch.bridgeStale") : say("watch.bridgeMissing"))
+      notice.appendChild(line)
+      if (typeof status.command === "string" && status.command !== "") {
+        const code = make("code", "dsh-bw-watch-bridge-cmd", status.command)
+        notice.appendChild(code)
+      }
+      panel.insertBefore(notice, panel.firstChild)
+    }
+    void showBridgeStatus()
+  }
+
+  function apply(ctx) {
+    // Before anything renders: the rows need a hover state, and inline styles cannot express
+    // one. Idempotent, so a re-apply does not stack copies.
+    installStyles()
+    installPanelService(ctx)
+    installWatchPanel(ctx)
+    ctx.effect(() => ctx.locale.register(NS, { zh, en }), "dsh-builtin-browser: dictionaries")
+    const t = ctx.locale.bind(NS)
+    translate = t
+    ctx.slots.inject("settings.section", () => ctx.slots.register({
+      name: "settings.section",
+      id: "dsh-builtin-browser",
+      // Above the rows the host ships (its furthest sits at 40), so this panel
+      // lands beneath them in the settings page.
+      order: 60,
+      label: () => t("nav"),
+      locale: NS,
+      inject: () => ({ t }),
+    }, SettingsRoot))
+  }
+
+  exports.name = name
+  exports.inject = inject
+  exports.apply = apply
+  return module.exports
+}})

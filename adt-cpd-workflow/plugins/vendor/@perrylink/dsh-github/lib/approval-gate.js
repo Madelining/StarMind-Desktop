@@ -1,0 +1,152 @@
+const ACTION_BY_TOOL = {
+    pr_create: 'pr.create',
+    pr_merge: 'pr.merge',
+    pr_update: 'pr.update',
+    review_post: 'review.post',
+    issue_open: 'issue.create',
+    issue_comment: 'issue.comment',
+    issue_close: 'issue.close',
+    ci_run: 'ci.run',
+};
+/** Tools the gate intercepts; everything else delegates via next(). */
+const WRITE_TOOLS = new Set(Object.keys(ACTION_BY_TOOL));
+/**
+ * Whether the host granted this session full access with prompts disabled.
+ *
+ * `ask` is not a prompt in a session whose approval policy is `never` — the
+ * host's ApprovalService short-circuits it to `rejected` before any answerer,
+ * so a write would fail with "the user rejected" without ever asking. This
+ * predicate only grants the bypass when the live sandbox policy also reports
+ * `danger-full-access`, and any missing service or thrown lookup fails closed.
+ * @param ctx - plugin context.
+ * @param exec - the intercepted tool execution carrying the live agent.
+ * @returns true only for a danger-full-access session whose policy is never.
+ */
+function isUnattendedFullAccess(ctx, exec) {
+    try {
+        const session = exec.agent?.session;
+        if (session === undefined)
+            return false;
+        const approval = ctx.approval;
+        if (approval.effectivePolicy?.(session) !== 'never')
+            return false;
+        const sandbox = ctx.get('sandboxPolicy');
+        return sandbox?.resolve?.({ session })?.mode === 'danger-full-access';
+    }
+    catch {
+        return false;
+    }
+}
+/** Read the frozen tool arguments as a plain object, tolerant of bad input. */
+function argumentsAsRecord(exec) {
+    return typeof exec.arguments === 'object' && exec.arguments !== null ? exec.arguments : {};
+}
+/** `"title" (body N chars)`-style preview of a titled write. */
+function titledPreview(args) {
+    const title = typeof args.title === 'string' ? args.title : '(untitled)';
+    const body = typeof args.body === 'string' ? args.body.trim() : '';
+    return body.length === 0 ? `"${title}"` : `"${title}" (body ${body.length} chars)`;
+}
+/** First line of a string, elided to `max` characters. */
+function firstLine(value, max) {
+    const line = value.split('\n')[0] ?? '';
+    return line.length > max ? `${line.slice(0, max)}…` : line;
+}
+/** Human-readable reason for the approval prompt of one write call. */
+function askReason(toolName, args, state) {
+    if (toolName === 'pr_create') {
+        return `create GitHub pull request ${titledPreview(args)}`;
+    }
+    if (toolName === 'pr_merge') {
+        const target = typeof args.pr === 'string' ? ` ${args.pr}` : '';
+        const method = typeof args.mergeMethod === 'string' ? args.mergeMethod : 'merge';
+        const deleteBranch = args.deleteBranch === true ? ' (delete head branch after merge)' : '';
+        return `merge GitHub pull request${target} via ${method}${deleteBranch}`;
+    }
+    if (toolName === 'pr_update') {
+        const target = typeof args.pr === 'string' ? ` ${args.pr}` : '';
+        const edits = [];
+        if (typeof args.title === 'string')
+            edits.push(`title "${firstLine(args.title, 60)}"`);
+        if (typeof args.state === 'string')
+            edits.push(`state ${args.state}`);
+        if (typeof args.base === 'string')
+            edits.push(`base ${args.base}`);
+        if (typeof args.body === 'string' && args.body.trim().length > 0)
+            edits.push(`body ${args.body.trim().length} chars`);
+        return `update GitHub pull request${target}${edits.length > 0 ? ` (${edits.join('; ')})` : ''}`;
+    }
+    if (toolName === 'review_post') {
+        if (typeof args.jobId !== 'string')
+            return 'post GitHub review comments';
+        const record = state.records.get(args.jobId);
+        const isModelReview = record?.report !== null && record?.report !== undefined && record.report.findings.length === 0 && record.report.summary.startsWith('model review');
+        const target = record === undefined || record.report === null
+            ? `job ${args.jobId}`
+            : isModelReview
+                ? `PR #${record.pr} (model review)`
+                : `PR #${record.pr} (${record.report.findings.length} finding(s))`;
+        const mode = args.mode === 'inline' ? 'inline' : 'summary';
+        const override = typeof args.body === 'string' && args.body.trim().length > 0
+            ? `; body override: ${firstLine(args.body.trim(), 80)}`
+            : '';
+        return `post GitHub review comments for ${target} (${mode})${override}`;
+    }
+    if (toolName === 'issue_open') {
+        return `create GitHub issue ${titledPreview(args)}`;
+    }
+    if (toolName === 'issue_comment') {
+        const number = typeof args.issueNumber === 'number' ? ` #${args.issueNumber}` : '';
+        const body = typeof args.body === 'string' ? args.body.trim() : '';
+        return `comment on GitHub issue${number}${body.length === 0 ? '' : ` (body ${body.length} chars)`}`;
+    }
+    if (toolName === 'issue_close') {
+        const number = typeof args.issueNumber === 'number' ? ` #${args.issueNumber}` : '';
+        return `close GitHub issue${number}`;
+    }
+    if (toolName === 'ci_run') {
+        const target = typeof args.pr === 'string' ? ` ${args.pr}` : '';
+        const task = typeof args.task === 'string' ? args.task : 'review';
+        return `run CI ${task} for GitHub pull request${target} (posts review comments and a status check)`;
+    }
+    return 'perform a GitHub write action';
+}
+/**
+ * Register the approval gate. Registration is an effect: disposing the plugin
+ * fiber removes the listener.
+ *
+ * Unattended CI runs (`DSH_GITHUB_CI_DRIVER=1`) auto-allow exactly the
+ * actions listed in `ci.autoApprove` — the composite action composes that
+ * allowlist for the write the pipeline needs. Interactive sessions always
+ * ask, and actions missing from `allowedActions` stay denied everywhere.
+ * @param ctx - plugin context; the listener lives on the shared tools pipeline.
+ * @param state - plugin state used to enrich approval reasons.
+ * @returns the effect disposer.
+ */
+export function registerApprovalGate(ctx, state) {
+    return ctx.on('tools/pre-execute', async (exec, next) => {
+        if (!WRITE_TOOLS.has(exec.name))
+            return next();
+        const action = ACTION_BY_TOOL[exec.name];
+        if (action === undefined || !state.config.allowedActions.includes(action)) {
+            return { kind: 'deny', reason: `dsh-github: action "${action ?? exec.name}" is not in allowedActions` };
+        }
+        if (state.isCiDriver && state.config.ci.autoApprove.includes(action)) {
+            // The CI driver bypasses the prompt through the official policy seam:
+            // pin the calling agent's approval policy to 'never' (no escalation, no
+            // prompt) and allow the in-flight call. The host hands us its own Agent
+            // handle, which is exactly what setPolicy declares.
+            if (exec.agent !== undefined)
+                ctx.approval.setPolicy(exec.agent, 'never');
+            return { kind: 'allow' };
+        }
+        if (isUnattendedFullAccess(ctx, exec)) {
+            // A danger-full-access session with prompts disabled cannot ask; the host
+            // would reject the call and report a rejection the human never made.
+            // allowedActions still gates the action before this point.
+            return { kind: 'allow' };
+        }
+        return { kind: 'ask', reason: `dsh-github: ${askReason(exec.name, argumentsAsRecord(exec), state)}` };
+    });
+}
+//# sourceMappingURL=approval-gate.js.map

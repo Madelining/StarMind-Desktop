@@ -1,84 +1,129 @@
-{
-  "capturedAt": "2026-11-01",
-  "capturedFrom": {
-    "product": "StarMind Desktop (Beta)",
-    "dshVersion": "0.2.2-alpha.2",
-    "dshHome": "%USERPROFILE%\\.dsh-beta",
-    "profile": "desktop",
-    "os": "Windows 11 x64"
-  },
-  "note": "记录导出时刻 profile 中已安装的插件。bundles 顺序即 cordis 组合层的应用顺序，不要随意调整。",
-  "productBundles": [
-    "@deepseek-ai/dsh-base",
-    "@deepseek-ai/dsh-web-app",
-    "@agents-anywhere/dsh-bridge-next",
-    "dshmarket",
-    "@deepseek-ai/dsh-experimental-subagent-oar"
-  ],
-  "productBundlesNote": "上列由 StarMind 发行版自带，随客户端提供，不需要也不应该由本仓库安装。dsh-experimental-subagent-oar 是默认关闭的实验层，需要时在「设置 -> 插件」里开启。",
-  "plugins": [
-    {
-      "name": "dsh-remote",
-      "version": "0.8.67",
-      "license": "MIT",
-      "bundle": true,
-      "vendorDir": "vendor/dsh-remote",
-      "purpose": "远程工作区：SSH 连机器、镜像同步、远程执行、端口转发、远程 DSH 界面、审计日志。ADT/CPD 方案的环境层完全依赖它。",
-      "provides": ["22 个 rw_* 工具", "设置 -> 远程工作区 面板", "远程 sandbox 围栏", "audit.log"],
-      "engines": { "dsh": ">=0.1.0-rc.6 <0.3.0" },
-      "priority": 1
-    },
-    {
-      "name": "dsh-mnemon",
-      "version": "0.5.37",
-      "license": "MIT",
-      "bundle": true,
-      "vendorDir": "vendor/dsh-mnemon",
-      "purpose": "分层运行期记忆：Documents 检索、Memory Spaces 召回、runtime MEMORY.md / USER.md 热记忆注入。跨会话经验沉淀靠它。",
-      "provides": ["mnemon_* 工具族", "每轮注入的 MEMORY.md / USER.md 快照"],
-      "priority": 2
-    },
-    {
-      "name": "@tt-a1i/archify-dsh",
-      "version": "1.0.0",
-      "license": "MIT",
-      "bundle": true,
-      "vendorDir": "vendor/@tt-a1i/archify-dsh",
-      "purpose": "架构 / 流程 / 时序 / 数据流 / 状态机图的可交互 HTML 生成，带校验与浏览器检查。评审材料出图用。",
-      "provides": ["archify 技能"],
-      "priority": 3
-    },
-    {
-      "name": "dsh-univer-office",
-      "version": "0.3.9",
-      "license": "Apache-2.0",
-      "bundle": true,
-      "vendorDir": null,
-      "purpose": "Office 文档、表格、演示、PDF 的创建与编辑（Univer 引擎，含协作 Gateway 与预览）。",
-      "provides": ["univer_* 工具族", "office / office-pptx / office-docx / office-xlsx 等技能"],
-      "vendorNote": "包体 186.9 MB（含 Univer 运行时与 puppeteer-core），不放入 vendor；安装时从 npm 拉取。",
-      "priority": 4
-    },
-    {
-      "name": "@liustack/modlens",
-      "version": "3.27.2",
-      "license": "MIT",
-      "bundle": true,
-      "vendorDir": "vendor/@liustack/modlens",
-      "purpose": "给纯文本模型加视觉桥：把本地图片 / 截图 / 图表转成结构化证据再交给模型。",
-      "provides": ["modlens_read_image"],
-      "requiresExternal": "需本机有可用的 modlens 引擎（npx @liustack/modlens doctor 自检）",
-      "priority": 5
-    },
-    {
-      "name": "dsh-plugin-save-token",
-      "version": "2.4.1",
-      "license": "MIT",
-      "bundle": true,
-      "vendorDir": "vendor/dsh-plugin-save-token",
-      "purpose": "压缩冗长的工具输出，降低上下文成本；被压缩的原文可用 save_token_expand 取回。",
-      "provides": ["save_token_expand"],
-      "priority": 6
-    }
-  ]
+﻿{
+    "capturedAt":  "2026-11-01",
+    "capturedFrom":  {
+                         "product":  "StarMind Desktop (Beta)",
+                         "dshVersion":  "0.2.2-alpha.2",
+                         "dshHome":  "%USERPROFILE%\\.dsh-beta",
+                         "profile":  "desktop",
+                         "os":  "Windows 11 x64"
+                     },
+    "note":  "记录导出时刻 profile package.json 里的全部第三方依赖。bundles 顺序即 cordis 组合层的应用顺序，不要随意调整。这份清单会随使用者自行安装插件而漂移，更新请重跑 scripts/capture-plugins.ps1。",
+    "productBundles":  [
+                           "@deepseek-ai/dsh-base",
+                           "@deepseek-ai/dsh-web-app",
+                           "@agents-anywhere/dsh-bridge-next",
+                           "dshmarket",
+                           "@deepseek-ai/dsh-experimental-subagent-oar"
+                       ],
+    "productBundlesNote":  "上列由 StarMind 发行版自带，随客户端提供，不需要也不应该由本仓库安装。dsh-experimental-subagent-oar 是默认关闭的实验层，需要时在「设置 -\u003e 插件」里开启。",
+    "plugins":  [
+                    {
+                        "name":  "dsh-remote",
+                        "version":  "0.8.67",
+                        "license":  "MIT",
+                        "bundle":  true,
+                        "vendorDir":  "vendor/dsh-remote",
+                        "purpose":  "远程工作区：SSH 连机器、镜像同步、远程执行、端口转发、远程 DSH 界面、审计日志。ADT/CPD 方案的环境层完全依赖它。",
+                        "provides":  [
+                                         "22 个 rw_* 工具",
+                                         "设置 -\u003e 远程工作区 面板",
+                                         "远程 sandbox 围栏",
+                                         "audit.log"
+                                     ],
+                        "engines":  {
+                                        "dsh":  "\u003e=0.1.0-rc.6 \u003c0.3.0"
+                                    },
+                        "priority":  1
+                    },
+                    {
+                        "name":  "dsh-mnemon",
+                        "version":  "0.5.37",
+                        "license":  "MIT",
+                        "bundle":  true,
+                        "vendorDir":  "vendor/dsh-mnemon",
+                        "purpose":  "分层运行期记忆：Documents 检索、Memory Spaces 召回、runtime MEMORY.md / USER.md 热记忆注入。跨会话经验沉淀靠它。",
+                        "provides":  [
+                                         "mnemon_* 工具族",
+                                         "每轮注入的 MEMORY.md / USER.md 快照"
+                                     ],
+                        "priority":  2
+                    },
+                    {
+                        "name":  "@tt-a1i/archify-dsh",
+                        "version":  "1.0.0",
+                        "license":  "MIT",
+                        "bundle":  true,
+                        "vendorDir":  "vendor/@tt-a1i/archify-dsh",
+                        "purpose":  "架构 / 流程 / 时序 / 数据流 / 状态机图的可交互 HTML 生成，带校验与浏览器检查。评审材料出图用。",
+                        "provides":  [
+                                         "archify 技能"
+                                     ],
+                        "priority":  3
+                    },
+                    {
+                        "name":  "dsh-univer-office",
+                        "version":  "0.3.9",
+                        "license":  "Apache-2.0",
+                        "bundle":  true,
+                        "vendorDir":  null,
+                        "purpose":  "Office 文档、表格、演示、PDF 的创建与编辑（Univer 引擎，含协作 Gateway 与预览）。",
+                        "provides":  [
+                                         "univer_* 工具族",
+                                         "office / office-pptx / office-docx / office-xlsx 等技能"
+                                     ],
+                        "vendorNote":  "包体 186.9 MB，超过 50 MB 阈值，不放入 vendor；安装时从 npm 拉取。",
+                        "priority":  4
+                    },
+                    {
+                        "name":  "dsh-builtin-browser",
+                        "version":  "0.5.2",
+                        "license":  "MIT",
+                        "bundle":  true,
+                        "vendorDir":  "vendor/dsh-builtin-browser",
+                        "purpose":  "真实浏览器插件：可见的原生浏览器，Agent 通过 CDP 驱动，支持 DOM 级交互、任务级会话隔离、cookie 持久化、验证码识别与批量填表。",
+                        "provides":  [
+                                         "浏览器驱动工具族",
+                                         "设置 -\u003e 浏览器面板"
+                                     ],
+                        "priority":  5
+                    },
+                    {
+                        "name":  "@perrylink/dsh-github",
+                        "version":  "0.7.28",
+                        "license":  "Apache-2.0",
+                        "bundle":  true,
+                        "vendorDir":  "vendor/@perrylink/dsh-github",
+                        "purpose":  "GitHub CI 与 PR 协作：评审 PR、修 CI、带审批闸口的 PR / issue / repo / 文件工具、状态检查门。",
+                        "provides":  [
+                                         "GitHub 相关工具族",
+                                         "审批门控的写操作"
+                                     ],
+                        "priority":  6
+                    },
+                    {
+                        "name":  "@liustack/modlens",
+                        "version":  "3.27.2",
+                        "license":  "MIT",
+                        "bundle":  true,
+                        "vendorDir":  "vendor/@liustack/modlens",
+                        "purpose":  "给纯文本模型加视觉桥：把本地图片 / 截图 / 图表转成结构化证据再交给模型。",
+                        "provides":  [
+                                         "modlens_read_image"
+                                     ],
+                        "requiresExternal":  "需本机有可用的 modlens 引擎（npx @liustack/modlens doctor 自检）",
+                        "priority":  7
+                    },
+                    {
+                        "name":  "dsh-plugin-save-token",
+                        "version":  "2.4.1",
+                        "license":  "MIT",
+                        "bundle":  true,
+                        "vendorDir":  "vendor/dsh-plugin-save-token",
+                        "purpose":  "压缩冗长的工具输出，降低上下文成本；被压缩的原文可用 save_token_expand 取回。",
+                        "provides":  [
+                                         "save_token_expand"
+                                     ],
+                        "priority":  8
+                    }
+                ]
 }

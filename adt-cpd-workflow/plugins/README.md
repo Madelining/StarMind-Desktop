@@ -6,18 +6,20 @@
 
 ```
 plugins/
-├── manifest.json      # 权威清单：包名、版本、许可证、vendor 路径、用途
+├── manifest.json      # 权威清单：包名、版本、许可证、vendor 路径、用途、安装顺序
 └── vendor/            # 离线副本（npm 不可达时用）
     ├── dsh-remote/
     ├── dsh-mnemon/
     ├── @tt-a1i/archify-dsh/
+    ├── dsh-builtin-browser/
+    ├── @perrylink/dsh-github/
     ├── @liustack/modlens/
     └── dsh-plugin-save-token/
 ```
 
 `dsh-univer-office` 不在 `vendor/` 里——它 186.9 MB（含 Univer 运行时与 puppeteer-core），提交进仓库不划算，安装时从 npm 拉取。
 
-## 当前安装的 6 个插件
+## 当前安装的 8 个插件
 
 | 插件 | 版本 | 作用 | 少了它会怎样 |
 |---|---|---|---|
@@ -25,10 +27,24 @@ plugins/
 | `dsh-mnemon` | 0.5.37 | 分层记忆：Documents 检索 + Memory Spaces + 每轮热记忆 | 跨会话经验不沉淀 |
 | `@tt-a1i/archify-dsh` | 1.0.0 | 架构/流程/时序图的可交互 HTML 生成 | 出不了评审用的图 |
 | `dsh-univer-office` | 0.3.9 | Office / 表格 / 演示 / PDF 的创建与编辑（Univer 引擎） | 做不了 PPT/Word/Excel 交付物 |
+| `dsh-builtin-browser` | 0.5.2 | 可见的原生浏览器，Agent 经 CDP 驱动（DOM 级交互、会话隔离、cookie 持久化） | 做不了网页端操作与登录态复用 |
+| `@perrylink/dsh-github` | 0.7.28 | GitHub CI 与 PR 协作（评审 PR、修 CI、审批门控的写操作） | 只能手工操作 GitHub |
 | `@liustack/modlens` | 3.27.2 | 给纯文本模型加视觉桥（图片 → 结构化证据） | 看不了截图，GUI 冒烟验证只剩文本日志 |
 | `dsh-plugin-save-token` | 2.4.1 | 压缩冗长工具输出 | 上下文烧得更快，大日志吃不消 |
 
 均为 MIT / Apache-2.0 许可，可随仓库分发；各自的 LICENSE 已在 `vendor/<包名>/` 内保留。
+
+## 清单会漂移——用脚本重新采集
+
+`manifest.json` 记录的是「某台机器某个时刻装了哪些插件」。谁在客户端里装了新插件，这份清单就过时了。不要手工改，跑：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\capture-plugins.ps1           # 重新采集并同步 vendor
+powershell -ExecutionPolicy Bypass -File scripts\capture-plugins.ps1 -DryRun   # 只看差异
+```
+
+脚本直接从 profile 的 `package.json` + `node_modules` 采集版本、许可证、体积、`dsh.bundle` 声明，
+**保留已写好的 `purpose` / `provides` / `priority`**，只刷新机器可读的事实；超过 50 MB 的包自动跳过 vendor 并写明原因。
 
 ## 不属于「第三方插件」的部分
 
@@ -73,7 +89,7 @@ node <StarMind>\resources\runtime\x64\primary-runtime\dependencies\pnpm\bin\pnpm
 ## 为什么不用「把 node_modules 整个提交」
 
 本机 `profiles/desktop/node_modules` 是 **510 MB / 4672 个文件**（含 `dsh-univer-office`），其中绝大部分是 `.pnpm` 硬链接库和第三方依赖（zod、react、ssh2、univer…）。
-真正值得提交的只有 5 个包体、**约 14 MB / 664 个文件**，本仓库提交的是后者：
+真正值得提交的只有 7 个包体、**约 16 MB / 822 个文件**，本仓库提交的是后者：
 
 - 体积可控，diff 可读
 - 依赖由 pnpm 按 `package.json` 重新解析，不会把宿主机上的坏状态一起搬过去

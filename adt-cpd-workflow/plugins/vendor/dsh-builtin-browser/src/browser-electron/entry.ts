@@ -1,0 +1,714 @@
+/**
+ * Electron browser provider plugin entry: registers the Electron-backed
+ * `BrowserProvider` with `ctx.browser`. The provider needs a view host (real
+ * Electron `WebContentsView` objects). When a desktop shell supplies
+ * `ctx.electronViewHost`, that host is used (embedded, human-machine shared
+ * view). Otherwise the plugin self-hosts: it spawns its own Electron child
+ * (`host-main.js`) and drives it over a local TCP JSON-RPC socket, so
+ * installing the plugin is enough for `dsh_browser_*` tools to work on any
+ * surface.
+ * @module dsh-browser/browser-electron
+ */
+
+import type { Context } from '@deepseek-ai/cordis'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import z from '@deepseek-ai/schemastery'
+import type { BrowserRuntime } from '../browser/runtime.js'
+import { ElectronBrowserProvider } from './provider.js'
+import type { ElectronBrowserViewHost } from './provider.js'
+import type { CarrierLossReason } from '../browser/types.js'
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, renameSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { setTimeout as wait } from 'node:timers/promises'
+import { defaultHostMainPath, RemoteElectronViewHost } from './remote-host.js'
+import { DesktopBridgeViewHost } from './desktop-bridge-host.js'
+import { detectBrowser, searchSummary, SystemBrowserViewHost } from './system-browser.js'
+import { claimEphemeralProfile, ephemeralProfileName, sweepAbandonedEphemeralProfiles } from './ephemeral-profile.js'
+import { MissingSystemBrowserHost } from './missing-system-browser.js'
+import { SettingsStore, settingsPath } from './settings-store.js'
+import { sameOrigin } from './settings-route.js'
+import { handleBridgeStatus, handlePreviewFrame, handlePreviewSessions, BRIDGE_STATUS_ROUTE, PREVIEW_ROUTE, PREVIEW_SESSIONS_ROUTE } from './preview-route.js'
+
+export {
+  ELECTRON_BROWSER_PROVIDER_ID,
+  ElectronBrowserProvider,
+} from './provider.js'
+export type { ElectronBrowserViewHost, ElectronViewHandle } from './provider.js'
+export { RemoteElectronViewHost, defaultHostMainPath } from './remote-host.js'
+
+/** Cordis plugin name used by loader diagnostics. */
+export const name = 'browser-electron'
+
+/** The browser seam this provider registers into. */
+export const inject = ['browser']
+
+/** Plugin config: an optional externally-supplied view host. */
+export interface Config {
+  /** View host supplied by a desktop shell; absent -> self-host. */
+  readonly viewHost?: ElectronBrowserViewHost
+  /** Allow navigation only to HTTP(S) URLs. Default true. */
+  readonly httpOnly?: boolean
+  /**
+   * Directory `dsh_browser_download` save paths must resolve inside (prevents a
+   * prompt-injected agent from writing arbitrary machine paths). Default:
+   * the user's Downloads folder; override to confine downloads elsewhere.
+   */
+  readonly downloadDir?: string
+  /** Maximum snapshot elements before truncation. Default 60. */
+  readonly snapshotMaxElements?: number
+  /** Maximum content characters before truncation when no maxChars is given. No longer read: the cap is per format (html and json 50 000, otherwise 20 000). */
+  readonly contentMaxChars?: number
+}
+
+export const Config: z<Config> = z.object({
+  // Absent on surfaces without a desktop shell; the plugin self-hosts then.
+  viewHost: z.any(),
+  httpOnly: z.boolean().default(true),
+  downloadDir: z.string(),
+  snapshotMaxElements: z.number(),
+  contentMaxChars: z.number(),
+})
+
+/**
+ * This process's session id, read the way DSH's own desktop host reads it.
+ *
+ * `dsh-desktop-host/lib/index.js` does `ctx.get('agents')` then `agents.list()`, and uses
+ * `agent.id` directly as a sessionId. One conversation per process, so the list holds this one.
+ *
+ * Returns undefined rather than throwing when the service is absent — an older host, or a
+ * non-desktop composition. The caller falls back to a random id, which is what the bridge used
+ * before and is safe: it only means "this process", not "this conversation".
+ *
+ * @param ctx - the plugin context.
+ * @returns the session id, or undefined when it cannot be read.
+ */
+function readSessionId(ctx: unknown): string | undefined {
+  try {
+    const surface = ctx as { get?: (name: string) => unknown }
+    if (typeof surface.get !== 'function') return undefined
+    const agents = surface.get('agents') as { list?: () => unknown } | undefined
+    const list = typeof agents?.list === 'function' ? agents.list() : undefined
+    if (!Array.isArray(list) || list.length === 0) return undefined
+    const first = list[0] as { id?: unknown } | undefined
+    return typeof first?.id === 'string' && first.id !== '' ? first.id : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Register the Electron browser provider with `ctx.browser`. */
+export function apply(ctx: Context & { browser: BrowserRuntime }, config: Config): void {
+  // Which session is this process serving?
+  //
+  // The desktop shell keeps ONE sidebar per conversation — measured: two `[class*=_tabStrip]`
+  // containers sat in the DOM at once, each carrying its own session id on the React fiber, and
+  // the invisible one's webview was unloaded. So the bridge CAN tell which sidebar belongs to
+  // whom; what it lacked was the other half, this process's own identity. Without it, the bridge
+  // drove "whatever sidebar is on screen" and — measured on the running shell — typed into another
+  // conversation's address bar and navigated that page.
+  //
+  // The identity is available here, and DSH's own desktop host shows how
+  // (`dsh-desktop-host/lib/index.js`: `ctx.get('agents').list()`, with `agent.id` used directly as
+  // a sessionId). One conversation per process, so the list holds this one.
+  const sessionId = readSessionId(ctx)
+
+  // One settings document per plugin instance: the settings panel writes it, the
+  // provider reads it live, and both ends agree on the same file. The logger is passed so a
+  // discarded value (a mistyped channel, most of all) is reported instead of being silently
+  // replaced by the default — "my setting did nothing" and "I misspelled it" must not look alike.
+  const settings = new SettingsStore(undefined, message => ctx.logger?.warn?.(message))
+
+  const providerConfig = {
+    httpOnly: config.httpOnly,
+    downloadDir: config.downloadDir,
+    snapshotMaxElements: config.snapshotMaxElements,
+    contentMaxChars: config.contentMaxChars,
+    settings: () => settings.get(),
+  }
+
+  // A host supplied by the composition (the desktop shell's own seam) wins and is
+  // synchronous, so registration stays synchronous on that path.
+  if (config.viewHost !== undefined) {
+    const external = ctx.browser.registerBrowserProvider(new ElectronBrowserProvider(config.viewHost as ElectronBrowserViewHost, providerConfig))
+    ctx.effect(() => () => { external() })
+    // The composition supplied the carrier, so `browser.channel` is not ours to honour on this
+    // surface. Saying so is the difference between a setting that cannot apply and a setting that
+    // appears not to have worked — the second is what sends people looking for a bug elsewhere.
+    const asked = settings.get().browser.channel
+    if (asked !== 'sidebar' && asked !== 'bundled') {
+      ctx.logger?.warn?.(
+        `dsh-builtin-browser: browser.channel is "${asked}", but this surface's carrier was `
+        + 'supplied by its composition (the desktop shell), which outranks the setting. Set it to '
+        + '"sidebar" to record the intent, or run on a surface that picks its own carrier.',
+      )
+    }
+    return
+  }
+
+  // Otherwise start self-hosted — a working browser from the first call, on every
+  // surface — and upgrade to the desktop sidebar if this machine has one. The
+  // upgrade is deliberately a swap of the whole provider: the two carriers own
+  // different lifetimes (a spawned child vs. the shell's view), and pretending
+  // otherwise would leave a stray window behind.
+  const selfHosted = new RemoteElectronViewHost(defaultHostMainPath())
+  let unregister = ctx.browser.registerBrowserProvider(new ElectronBrowserProvider(selfHosted, providerConfig))
+  let disposed = false
+  let carrierChoice = 0
+  let discovery: AbortController | undefined
+  /** The carrier an `adopt` installed, so a later choice can release it. */
+  let adoptedCarrier: ElectronBrowserViewHost | undefined
+
+  ctx.effect(() => () => {
+    disposed = true
+    carrierChoice += 1
+    discovery?.abort()
+    unregister()
+    adoptedCarrier?.dispose?.()
+    selfHosted.dispose()
+  })
+
+  /**
+   * Put the self-hosted browser back after an adopted carrier reports that it is gone.
+   *
+   * This is the half the startup retries never covered: a bridge that was alive at apply time and
+   * exited later left every subsequent call dialling a port nobody owns, because the swap happened
+   * once and only in one direction. Reaching here means the carrier cannot serve anything more, so
+   * the choice made at startup is no longer a choice — the alternative to falling back is a browser
+   * surface that does nothing until DSH is restarted.
+   *
+   * Two failures arrive here and the message must distinguish them. The first draft announced an
+   * exiting shell unconditionally, so a fallback caused by an undrivable sidebar panel told the
+   * user their desktop shell had exited while it was running normally.
+   * @param adopted - the carrier that reported the loss, disposed once its replacement is in place.
+   * @param reason - which failure this was; see {@link CarrierLossReason}.
+   */
+  const restoreSelfHosted = (adopted: ElectronBrowserViewHost, reason: CarrierLossReason): void => {
+    // A replaced carrier may finish an outstanding request after the new choice is installed.
+    if (disposed || adoptedCarrier !== adopted) return
+    try {
+      const restored = new RemoteElectronViewHost(defaultHostMainPath())
+      unregister()
+      unregister = ctx.browser.registerBrowserProvider(new ElectronBrowserProvider(restored, providerConfig))
+      adoptedCarrier = restored
+      ctx.logger?.warn?.(
+        reason === 'shell-exited'
+          ? 'dsh-builtin-browser: the desktop shell backed the sidebar browser and has exited, so the '
+            + 'browser this plugin hosts itself takes over. Pages from the sidebar are gone with it; '
+            + 'open the page again.'
+          : 'dsh-builtin-browser: this desktop shell renders the sidebar browser panel in a way that '
+            + 'cannot be driven (no webContents, so no CDP endpoint), so the browser this plugin hosts '
+            + 'itself takes over. The shell is still running and nothing else is affected; the page '
+            + 'opens in this plugin\'s own window. Set browser.channel to another value to silence this.',
+      )
+    } catch (error) {
+      // Nothing better is available: the adopted carrier is gone and a provider that throws is
+      // worse than one that explains.
+      ctx.logger?.warn?.(`dsh-builtin-browser: could not fall back to the self-hosted browser: ${String(error)}`)
+    } finally {
+      // Disposed on a LATER turn of the event loop, deliberately.
+      //
+      // Disposing synchronously here closes the bridge socket while the request that triggered this
+      // fallback is still settling, and the close rejects every call still waiting on that socket —
+      // so the caller received "bridge closed" instead of the reason it actually failed for. The
+      // fallback is what the user is supposed to be able to understand; replacing its explanation
+      // with one about the connection loses exactly the information this path exists to convey.
+      setImmediate(() => {
+        try {
+          adopted.dispose?.()
+        } catch {
+          // A carrier that cannot be released is not the caller's problem; the swap already happened.
+        }
+      })
+    }
+  }
+
+  /**
+   * Swap the provider to another carrier, releasing the previous one.
+   * @param host - the carrier to adopt.
+   * @param note - a one-line description for the log.
+   */
+  const adopt = (host: ElectronBrowserViewHost, note: string, choice = carrierChoice): void => {
+    if (disposed || choice !== carrierChoice) {
+      try { host.dispose?.() } catch { /* a stale result must not escape its retry */ }
+      return
+    }
+    // This guard used to make the FIRST choice final, disposing anything that arrived later. That
+    // is right against two carriers racing in, and exactly wrong for a user changing the setting:
+    // `chooseCarrier` runs again on purpose, and a refusal here is indistinguishable from the
+    // write having done nothing. The previous carrier is now released by the replacement instead.
+    const previous = adoptedCarrier
+    try {
+      unregister()
+      unregister = ctx.browser.registerBrowserProvider(new ElectronBrowserProvider(host, providerConfig))
+      selfHosted.dispose()
+      adoptedCarrier = host
+      ctx.logger?.info?.(`dsh-builtin-browser: ${note}`)
+      // A borrowed carrier can lose the process behind it, and this is the only notification that
+      // will ever arrive. Registering AFTER the swap succeeded means a listener can never fire
+      // against a provider that was never installed.
+      host.onLost?.(reason => { restoreSelfHosted(host, reason) })
+      // Released AFTER the replacement is installed, so the surface is never without a provider.
+      if (previous !== undefined && previous !== host) {
+        try { previous.dispose?.() } catch { /* the replacement is already serving */ }
+      }
+    } catch (error) {
+      // Never leave the surface without a provider. The half-built host is disposed FIRST: an
+      // adopt that got as far as constructing it may already hold a socket, a listener or a child
+      // process, and dropping it on the floor is how a failed upgrade becomes a leak that only
+      // shows up as a stray Electron in the task manager.
+      try { host.dispose?.() } catch { /* the fallback below matters more than this */ }
+      // The fallback registration gets its own guard, because THIS is the path taken when the
+      // context is already gone — and then `ctx.browser` throws `cannot get required service
+      // "browser" in inactive context`. Unguarded, that second throw escaped the async retry
+      // that calls `adopt`, became an unhandled rejection, and killed the host process with
+      // exit code 1: a failed upgrade, which should only ever cost a warning, took the whole
+      // session down instead. Observed 2026-10-05 (crash-…-host.log, phase: running).
+      try {
+        const fallback = new RemoteElectronViewHost(defaultHostMainPath())
+        unregister = ctx.browser.registerBrowserProvider(new ElectronBrowserProvider(fallback, providerConfig))
+        adoptedCarrier = fallback
+        if (previous !== undefined && previous !== host) {
+          try { previous.dispose?.() } catch { /* fallback is already serving */ }
+        }
+        ctx.logger?.warn?.(`dsh-builtin-browser: could not adopt ${note} (${String(error)})`)
+      } catch (fallbackError) {
+        ctx.logger?.warn?.(
+          `dsh-builtin-browser: could not adopt ${note} (${String(error)}), and the fallback `
+          + `registration also failed (${String(fallbackError)}) — no browser provider is `
+          + 'registered for this context')
+      }
+    }
+  }
+
+  /**
+   * Choose and install the carrier that `browser.channel` names RIGHT NOW.
+   *
+   * A function rather than straight-line code because the setting is read live everywhere else:
+   * the settings route writes the file and the provider picks the change up on its next call, so a
+   * channel that could only be honoured at apply time was the one setting whose write silently did
+   * nothing. Re-entrant by design — changing the channel means replacing the carrier, which is
+   * exactly what a second call does.
+   */
+  const chooseCarrier = (): void => {
+  if (disposed) return
+  const choice = ++carrierChoice
+  discovery?.abort()
+  const controller = new AbortController()
+  discovery = controller
+  const { signal } = controller
+  // A browser the user explicitly asked for outranks every automatic choice: the
+  // whole point of the setting is that they know which browser they want. It is
+  // launched with a plugin-owned profile, so their own windows are untouched.
+  //
+  // Registration is INERT: constructing the host starts nothing. The browser only
+  // launches when a command actually needs a page, so merely running DSH never
+  // spawns a browser window. (An earlier version launched it here, which meant a
+  // browser appeared the moment the plugin loaded — reported and fixed.)
+  const channel = settings.get().browser.channel
+  // Naming a browser is a decision about which one to use, so it also decides whether the
+  // desktop sidebar may take over. Skipping discovery for an explicit choice is what makes
+  // that choice real — otherwise a user who picked Chrome would silently get the sidebar,
+  // and a user who picked a browser that is not installed would never see the explanation
+  // written for exactly that case, because the sidebar would quietly replace it.
+  const explicitChoice: boolean = channel !== 'bundled' && channel !== 'auto' && channel !== 'sidebar'
+  if (channel !== 'bundled' && channel !== 'sidebar') {
+    const detected = detectBrowser(channel)
+    if (detected === undefined) {
+      // `auto` promises to take whatever is available, so falling back is what it
+      // asked for. Naming a browser is a specific request, and quietly satisfying it
+      // with a different one turns the real problem ("no Chrome here") into a
+      // confusing error about Electron later on. Report it instead.
+      if (channel === 'auto') {
+        ctx.logger?.warn?.('dsh-builtin-browser: no installed browser was found; using the bundled browser')
+        if (adoptedCarrier !== undefined) {
+          adopt(new RemoteElectronViewHost(defaultHostMainPath()), 'using the bundled browser', choice)
+        }
+      } else {
+        adopt(new MissingSystemBrowserHost(channel, searchSummary(channel)),
+          `the selected ${channel} is not installed — commands will explain how to fix it`)
+      }
+    } else {
+      // Same profile root as settings-store, history-store and desktop-bridge-host: the
+      // `?.dsh` component used to be missing HERE only, so a desktop launched from a
+      // shortcut (no DSH_HOME in the environment) put its browser profile in
+      // `C:\Users\<user>\dsh-builtin-browser-host\` while its settings and history lived in
+      // `~/.dsh/dsh-builtin-browser-host/` — two half-profiles that never met, and a
+      // settings panel whose switches appeared not to apply.
+      const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
+      // Login state lives in the browser profile, so the cookies setting decides where
+      // that profile goes: a stable directory keeps the user signed in across restarts
+      // (the point of using their own browser), while turning persistence off gets a
+      // throwaway directory that is removed when the browser is released.
+      const persist = settings.get().cookies.persist
+      const profileRoot = join(home, BROWSER_PROFILE_DIR)
+      adoptLegacyProfileRoot(profileRoot)
+      const profileDir = persist
+        ? join(profileRoot, `${detected.kind}-profile`)
+        : join(profileRoot, ephemeralProfileName(detected.kind, randomUUID()))
+      if (!persist) {
+        // A process killed outright never runs its own cleanup (see ephemeral-profile.ts),
+        // so the sweep happens HERE — at the only moment that can still act on a profile
+        // whose owner is gone — and before this run claims a directory of its own.
+        sweepAbandonedEphemeralProfiles(profileRoot, detected.kind)
+        claimEphemeralProfile(profileDir)
+      }
+      // The headless mode rides along so a display-less host (systemd, container, SSH-only server)
+      // still gets a working browser instead of "exited immediately after launch" — issue #32.
+      adopt(new SystemBrowserViewHost(detected, profileDir, [], persist ? undefined : profileDir,
+        undefined, settings.get().browser.headless),
+        `will drive the installed ${detected.kind} (${detected.path}${persist ? '' : ', ephemeral profile'})`)
+    }
+  } else if (adoptedCarrier !== undefined) {
+    // The original self-hosted carrier was disposed by the first adoption. Switching back
+    // must install a new one, even when no sidebar is found during the discovery below.
+    adopt(new RemoteElectronViewHost(defaultHostMainPath()), 'using the bundled browser', choice)
+  }
+
+  // An explicit choice was already adopted above; discovering the sidebar here would
+  // replace it, which is exactly what this guard prevents.
+  //
+  // `sidebar` is explicit too, but it names the sidebar, so it is the one explicit choice that
+  // must FALL THROUGH to the discovery below instead of returning here.
+  if (explicitChoice && channel !== 'sidebar') return
+
+  // The shell may not be up yet. `dsh web` starts before — or entirely without — the desktop app
+  // that hosts the bridge, and a one-shot discovery meant a bridge that appeared a second later
+  // was never adopted for the rest of the process's life. Retry a handful of times over roughly
+  // half a minute, then stop: this is a convenience, not a promise, and the session the user is
+  // already driving in the self-hosted window is not worth replacing minutes into their work.
+  // Each attempt belongs to this choice. A later settings write or teardown cancels its waits,
+  // and an endpoint returned by an already-running discovery is disposed instead of installed.
+  void (async () => {
+    for (const delay of [0, 2_000, 5_000, 15_000]) {
+      if (delay > 0) {
+        try { await wait(delay, undefined, { signal }) } catch { return }
+      }
+      if (signal.aborted || disposed) return
+      let sidebar: Awaited<ReturnType<typeof DesktopBridgeViewHost.discover>>
+      try {
+        sidebar = await DesktopBridgeViewHost.discover(sessionId)
+      } catch {
+        sidebar = undefined // discovery is documented not to throw; never let it stop the retries
+      }
+      if (signal.aborted || disposed) {
+        try { sidebar?.dispose?.() } catch { /* the choice no longer owns this result */ }
+        return
+      }
+      if (sidebar === undefined) continue
+      adopt(sidebar, 'driving the desktop sidebar browser', choice)
+      return
+    }
+    // A bridge exists but its sidebar panel is an iframe. Saying nothing here would leave the user
+    // with a second browser window on a machine where they just followed the instructions to
+    // install the bridge, and no way to know the two facts are related. The carrier is not
+    // unavailable by accident: an iframe has no CDP endpoint, so adopting it would fail every call
+    // instead of falling back — see DesktopBridgeViewHost.discover.
+    if (DesktopBridgeViewHost.refusedIframePanel()) {
+      ctx.logger?.warn?.(
+        'dsh-builtin-browser: a desktop bridge is installed, but this shell renders the sidebar '
+        + 'browser panel as an iframe rather than a webview, which exposes no CDP endpoint and '
+        + 'cannot be driven. Using the browser this plugin hosts itself instead — that is the '
+        + 'independent window, not the sidebar. A shell that exposes `dshDesktop.browser` and '
+        + 'enables `webviewTag` would provide a drivable panel.',
+      )
+      return
+    }
+    // The user explicitly asked for the sidebar, so silence would leave them with a setting
+    // that did nothing and no way to tell why. This is reachable on `dsh web`, and on a desktop
+    // whose shell never published a bridge endpoint. An automatic attempt stays quiet (the
+    // self-hosted window is a fine outcome); an explicit request does not.
+    if (channel === 'sidebar') {
+      ctx.logger?.warn?.(
+        'dsh-builtin-browser: the sidebar browser was requested but no desktop bridge was found — '
+        + 'this DSH has no desktop shell, or its bridge never started. Falling back to the bundled '
+        + 'browser; set browser.channel to another value to silence this.',
+      )
+    }
+  })()
+  }
+
+  chooseCarrier()
+
+  // Wired AFTER the chooser exists, because the handler re-runs it: a settings write that changes
+  // `browser.channel` is a request to switch carriers, and answering `ok` without switching is the
+  // one thing a caller cannot tell apart from a write that worked.
+  /**
+   * Expose the live-view frame endpoint on the host's web server (issue #34).
+   *
+   * Registered exactly like the settings route and skipped the same way when a surface has no web
+   * server: a CLI session simply has no viewer, which is not a plugin-startup failure. The endpoint
+   * is inert until the host turns `remoteView.enabled` on, and it refuses a request whose session the
+   * plugin never handed out.
+   * @param ctx - the plugin context.
+   * @param settings - the settings document, for the share switch.
+   */
+  function installPreviewRoute(ctx: Context, settings: SettingsStore): void {
+    const injectPreview = (ctx as unknown as {
+      inject?: (deps: readonly string[], callback: (host: WebServerHost) => void) => void
+    }).inject
+    if (typeof injectPreview !== 'function') return
+    try {
+      injectPreview(['webServer', 'browser'], (host) => {
+        const browser = (ctx as unknown as { browser?: PreviewBrowser }).browser
+        if (browser === undefined) return
+        host.effect(() => host.webServer.register({
+          kind: 'exact',
+          path: PREVIEW_ROUTE,
+          handler: (request, response) => handlePreviewFrame(request, response, settings, browser),
+        }, 'dsh-builtin-browser: live view frame'))
+        // The list the panel needs before it can build a frame URL at all: session ids only.
+        host.effect(() => host.webServer.register({
+          kind: 'exact',
+          path: PREVIEW_SESSIONS_ROUTE,
+          handler: (request, response) => handlePreviewSessions(request, response, settings, browser),
+        }, 'dsh-builtin-browser: live view sessions'))      })
+    } catch {
+      // No web server on this surface: watching is simply unavailable, and nothing else changes.
+    }
+  }
+
+  /**
+   * Expose the bridge's install state on the host's web server, for the settings panel.
+   *
+   * Separate from the live-view routes because it needs no browser service: it reads the install
+   * tree, which is on disk and independent of any carrier. A surface without a web server skips it,
+   * exactly like the other two.
+   * @param ctx - the plugin context.
+   */
+  function installBridgeStatusRoute(ctx: Context): void {
+    const injectStatus = (ctx as unknown as {
+      inject?: (deps: readonly string[], callback: (host: WebServerHost) => void) => void
+    }).inject
+    if (typeof injectStatus !== 'function') return
+    try {
+      injectStatus(['webServer'], (host) => {
+        host.effect(() => host.webServer.register({
+          kind: 'exact',
+          path: BRIDGE_STATUS_ROUTE,
+          handler: (request, response) => handleBridgeStatus(request, response),
+        }, 'dsh-builtin-browser: bridge status'))
+      })
+    } catch {
+      // No web server: the panel is unreachable, and the installer stays the interface.
+    }
+  }
+
+  installSettingsRoute(ctx, settings, () => { chooseCarrier() })
+
+  /**
+   * Re-run the carrier choice when the settings FILE changes on disk.
+   *
+   * The route above covers a write through the panel. It does not cover a person editing
+   * `settings.json` by hand — and that is how `browser.channel` gets changed when the panel is
+   * unreachable or the user prefers the file. Measured: the document said `sidebar` and the plugin
+   * kept driving the self-hosted window built for the previous choice, because nothing re-read it.
+   *
+   * Change detection is on the channel alone, not the mtime: a poll that re-chose the carrier on
+   * every unrelated save would tear down and rebuild a working browser session for a switch that
+   * cannot affect it. mtime is only the cheap trigger to go and look.
+   */
+  const watchSettingsFile = (): void => {
+    const file = settingsPath()
+    let lastChannel = settings.get().browser.channel
+    let lastMtime = 0
+    try { lastMtime = statSync(file).mtimeMs } catch { /* not written yet */ }
+    const timer = setInterval(() => {
+      if (disposed) { clearInterval(timer); return }
+      let mtime = 0
+      try { mtime = statSync(file).mtimeMs } catch { return }
+      if (mtime === lastMtime) return
+      lastMtime = mtime
+      const channel = settings.get().browser.channel
+      if (channel === lastChannel) return
+      lastChannel = channel
+      ctx.logger?.info?.(`dsh-builtin-browser: settings changed on disk, re-choosing the carrier for channel "${channel}"`)
+      chooseCarrier()
+    }, 2_000)
+    // Unref-ed so a poll never holds the process open.
+    timer.unref?.()
+    ctx.effect(() => () => { clearInterval(timer) }, "dsh-builtin-browser: settings file watch")
+  }
+  watchSettingsFile()
+  installPreviewRoute(ctx, settings)
+  installBridgeStatusRoute(ctx)
+}
+
+/** Route the settings panel reads and writes. */
+const SETTINGS_ROUTE = '/dsh-builtin-browser/settings'
+
+/**
+ * The directory under the DSH home that holds this plugin's browser profile.
+ *
+ * Named once, because every consumer of it must agree: `settingsPath()` and the history
+ * store resolve their own copy from `$DSH_HOME`, and a profile written under a different
+ * root than the settings document is a pair that silently never meets.
+ */
+const BROWSER_PROFILE_DIR = 'dsh-builtin-browser-host'
+
+/**
+ * Move a browser profile left behind by the old layout into the directory the plugin uses now.
+ *
+ * Before the `?.dsh` component was added here, a desktop launched from a shortcut (no `DSH_HOME`
+ * in the environment) put its browser profile in `<homedir>/dsh-builtin-browser-host/` while its
+ * settings and history lived in `<homedir>/.dsh/dsh-builtin-browser-host/`. Login state lives
+ * INSIDE the browser profile, so leaving the old directory behind silently signs the user out of
+ * everything they had signed into — reported after the fix shipped, as a one-time cost of it.
+ *
+ * That cost does not have to be paid. The move happens only when the new location is absent, so a
+ * profile in use is never overwritten, and every failure — a cross-device rename, a permission
+ * problem, a profile another process holds — falls through to an empty profile, which is exactly
+ * what would have happened without this function. The old directory is then left untouched rather
+ * than deleted, because a half-moved profile is worse than a stale one.
+ *
+ * @param profileRoot - the root the plugin resolves today (`<DSH_HOME>/dsh-builtin-browser-host`).
+ * @param legacyRoot - the pre-`DSH_HOME` layout's root. Injected so the move can be exercised
+ *   without touching the real home directory.
+ */
+export function adoptLegacyProfileRoot(
+  profileRoot: string,
+  legacyRoot: string = join(homedir(), BROWSER_PROFILE_DIR),
+): void {
+  try {
+    if (legacyRoot === profileRoot) return
+    if (!existsSync(legacyRoot) || existsSync(profileRoot)) return
+    // `renameSync` needs the destination's PARENT to exist, and on a fresh install it does not:
+    // the old layout never created `.dsh` at all. Creating it is harmless if it is already there.
+    mkdirSync(dirname(profileRoot), { recursive: true })
+    renameSync(legacyRoot, profileRoot)
+  } catch {
+    // Nothing here is worth failing an apply over; the fallback is the pre-existing behaviour.
+  }
+}
+
+/** What the frame route needs from the browser service. */
+interface PreviewBrowser {
+  exists(session: string): boolean
+  capturePassive(session: string, signal?: AbortSignal): Promise<{ readonly dataUrl: string }>
+  watchableSessions?(): readonly string[]
+}
+
+/** The host web-server surface this plugin uses, described structurally. */
+interface WebServerHost {
+  readonly webServer: {
+    register(
+      spec: {
+        readonly kind: 'exact'
+        readonly path: string
+        readonly handler: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>
+      },
+      label?: string,
+    ): () => void
+  }
+  effect(callback: () => (() => void) | void): void
+}
+
+/**
+ * Expose the settings document over the host's web server, which is how the
+ * settings panel reads and writes it. A host without that service (headless /
+ * CLI surfaces) simply skips this: the panel is then unreachable and the file
+ * stays hand-editable — never a plugin-startup failure.
+ * @param ctx - the plugin context.
+ * @param settings - the settings document to expose.
+ */
+function installSettingsRoute(
+  ctx: Context,
+  settings: SettingsStore,
+  onChannelChange?: () => void,
+): void {
+  const inject = (ctx as unknown as {
+    inject?: (deps: readonly string[], callback: (host: WebServerHost) => void) => void
+  }).inject
+  if (typeof inject !== 'function') return
+  try {
+    inject(['webServer'], (host) => {
+      host.effect(() => host.webServer.register({
+        kind: 'exact',
+        path: SETTINGS_ROUTE,
+        handler: (request, response) => handleSettingsRequest(request, response, settings, onChannelChange),
+      }, 'dsh-builtin-browser: settings'))
+    })
+  } catch {
+    // No web server on this surface: the settings file remains the interface.
+  }
+}
+
+/**
+ * One settings round-trip: `GET` reads the document, `PUT`/`POST` merges a
+ * partial patch into it. Admission lives in `settings-route.ts` so it can be tested.
+ * @param request - the incoming request.
+ * @param response - the response to write.
+ * @param settings - the settings document.
+ * @param onChannelChange - re-runs the carrier choice when this write changed `browser.channel`.
+ */
+async function handleSettingsRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  settings: SettingsStore,
+  onChannelChange?: () => void,
+): Promise<void> {
+  const json = (status: number, body: unknown): void => {
+    response.writeHead(status, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    })
+    response.end(JSON.stringify(body))
+  }
+  const method = request.method ?? 'GET'
+  if (!sameOrigin(request, method !== 'GET')) {
+    json(403, { ok: false, error: 'cross-origin request refused' })
+    return
+  }
+  if (method === 'GET') {
+    json(200, { ok: true, settings: settings.get(), path: settings.path() })
+    return
+  }
+  if (method !== 'PUT' && method !== 'POST') {
+    response.writeHead(405, { allow: 'GET, PUT' })
+    response.end()
+    return
+  }
+  try {
+    const body = await readBody(request)
+    const patch: unknown = body.trim() === '' ? {} : JSON.parse(body)
+    const before = settings.get().browser.channel
+    const updated = settings.update(patch)
+    // A changed `browser.channel` is a request to switch carriers, not just a value to store. The
+    // choice is re-run here so the write takes effect now — and the response says so, because a
+    // caller that cannot tell "applied" from "stored for later" has no way to know what it got,
+    // which is exactly how a write that did nothing read as a success.
+    const channelChanged = updated.browser.channel !== before
+    if (channelChanged) onChannelChange?.()
+    json(200, {
+      ok: true,
+      settings: updated,
+      ...channelChanged ? { carrierRechosen: true } : {},
+    })
+  } catch (error) {
+    json(400, { ok: false, error: `invalid settings patch: ${String(error)}` })
+  }
+}
+
+/**
+ * Read a request body with a hard cap (the settings patch is tiny, and an
+ * unbounded read would let any same-origin caller exhaust memory).
+ * @param request - the incoming request.
+ * @param limit - maximum accepted characters.
+ * @returns the body text.
+ */
+function readBody(request: IncomingMessage, limit = 64 * 1024): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    let text = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => {
+      text += String(chunk)
+      if (text.length > limit) {
+        request.destroy()
+        reject(new Error('settings patch too large'))
+      }
+    })
+    request.on('end', () => resolve(text))
+    request.on('error', reject)
+  })
+}

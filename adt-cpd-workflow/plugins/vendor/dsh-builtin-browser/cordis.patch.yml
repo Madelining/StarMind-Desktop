@@ -1,0 +1,63 @@
+# dsh-builtin-browser bundle patch: mounts the shared-browser capability into a
+# profile composition.
+#
+# Row names matter beyond loading: the host's client-module scan resolves a row's
+# specifier to a PACKAGE ROOT and reads `dsh.client` from there. A row named after
+# a subpath (`dsh-builtin-browser/browser`) is not a package specifier and is
+# skipped by design, which would leave the settings panel permanently absent even
+# though every tool works — hence the inert root row under the bare package name.
+#
+# The browser seam (ctx.browser) is always mounted, and the Electron provider plus
+# the dsh_browser_* tools are always registered. The CARRIER is chosen at run time:
+#
+#   1. a browser the user selected in settings (their installed Chrome / Edge),
+#      launched with a plugin-owned profile;
+#   2. the desktop shell's sidebar, driven over its loopback bridge — the agent
+#      then works on the same page the human is looking at;
+#   3. a self-hosted Electron window, which is what every surface without either
+#      of the above gets; installing the plugin is enough for the browser to work.
+#
+# DSH 0.2 no longer provides `electronViewHost` (the desktop shell's embedded view),
+# so the row below resolves to undefined on current hosts. It keeps reading the
+# seam on purpose: a host that reintroduces one is then picked up without a code
+# change, and an explicit `viewHost` always outranks the automatic choice.
+- insert:
+    # Root row. The host's client-module scan resolves a loader row's specifier
+    # to a PACKAGE ROOT; a row named after a subpath is skipped, and this package
+    # would then have no row to read its `dsh.client` declaration from — the
+    # browser would work while its settings panel never appeared. This row is
+    # inert (see src/index.ts) and exists only to name the package.
+    - id: dsh-builtin-browser
+      name: dsh-builtin-browser
+
+    - id: browser
+      name: dsh-builtin-browser/browser
+
+    - id: browser-electron
+      name: dsh-builtin-browser/browser-electron
+      config:
+        viewHost: !!js ctx.get('electronViewHost')
+
+    - id: tool-browser
+      name: dsh-builtin-browser/tool-browser
+      # The tool layer's own switches. The `config` key is what makes them reachable at all:
+      # without it nothing at the plugin level could set them, so the operator allow-list the
+      # READMEs describe was unreachable in every factory deployment.
+      #
+      # Every field is optional, so an empty mapping uses the defaults:
+      #
+      #   allowedActions: operator-level allow-list of browser tool names, applied to every
+      #     task in the deployment (a task can still narrow it further with dsh_browser_restrict).
+      #     READ_ONLY_TOOLS and dsh_browser_restrict are never blocked, whatever the list says.
+      #   timeoutMs: cooperative per-call budget in ms (default 60000).
+      #   tabTools: whether the tab-management tools are registered (default true).
+      #
+      # To restrict a deployment, replace this with, for example:
+      #   config:
+      #     allowedActions: [dsh_browser_snapshot, dsh_browser_a11y, dsh_browser_content, dsh_browser_click]
+      #
+      # The settings panel's "What the agent may do" switches are a SEPARATE layer with the
+      # same property — the model cannot lift them either — and they need no patch file at
+      # all. The list above restricts every task in a deployment; those three switches
+      # restrict what any task may do on this installation, and need no YAML.
+      config: {}
