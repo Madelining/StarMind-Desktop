@@ -57,6 +57,7 @@ devgate env-check --line adt --workspace /opt/ws/adt/adt-main --json
 | `devgate` 门禁骨架 | ⚠️ 三段可用（env-check / build / gui-smoke），**未在 Linux 上实测**；verify / bench / package / handoff 为占位 |
 | 插件清单与安装脚本 | ⚠️ 清单准确；安装脚本**未在干净机器上端到端验证** |
 | 安装器集成（`installer/`） | 🚧 脚本已就位（`bootstrap-plugins.mjs` + `plugin-kit.json`），**尚未接入产品安装器的 NSIS `customInstall`**，也未出过内部分发包；详见 [`installer/README.md`](installer/README.md) |
+| **离线基线包（`offline/`）** | ✅ 可用：`make-bundle.ps1` 出一份 4.5 MB 的 zip，同事双击 `import-bundle.cmd` 即装齐 7 个插件，**不依赖 npm、不改客户端代码**。已实测 dry-run 全流程；真实安装与全新机器未验证，详见 [`offline/README.md`](offline/README.md) |
 | 架构图 | ✅ `docs/architecture/adt-cpd-architecture.html`——archify `finalize` 四道门全绿（validate / deliver / check / browser-check）；源文件为同名 `.candidate.json`。**视觉观感未经人眼确认**，自动检查只覆盖几何与可读性阈值 |
 | `artget` 集成 | ❌ 待补（命令格式 / 版本来源 / 落地路径未定） |
 | CMake / Qt 具体参数 | ❌ 待补（目标名、生成器、Qt 版本、ctest 现状） |

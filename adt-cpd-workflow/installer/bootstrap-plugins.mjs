@@ -14,7 +14,7 @@
  * 用法：
  *   node bootstrap-plugins.mjs --home <DSH_HOME> --kit <plugin-kit 目录> \
  *        [--profile desktop] [--node <node.exe>] [--pnpm <pnpm.mjs>] \
- *        [--exclude a,b] [--dry-run]
+ *        [--exclude a,b] [--store-dir <pnpm store>] [--offline] [--dry-run]
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs'
@@ -36,6 +36,8 @@ const profileName = opt('profile', 'desktop')
 const nodeBin = opt('node', process.execPath)
 const pnpmJs = opt('pnpm')
 const exclude = String(opt('exclude', '')).split(',').map(s => s.trim()).filter(Boolean)
+const storeDir = opt('store-dir')
+const offline = flag('offline')
 const dryRun = flag('dry-run')
 
 if (!home || !kitDir) {
@@ -86,7 +88,12 @@ else {
 const wanted = kit.plugins.filter(p => p.required !== false && !exclude.includes(p.name))
 say(`[kit] 待装插件 ${wanted.length} 个：${wanted.map(p => p.name).join(', ')}`)
 
-const pnpmArgs = spec => ['add', spec, '--dir', profileDir, '--prefer-offline']
+const pnpmArgs = spec => {
+  const args = ['add', spec, '--dir', profileDir]
+  if (storeDir) args.push('--store-dir', storeDir)
+  args.push(offline ? '--offline' : '--prefer-offline')
+  return args
+}
 
 function runPnpm(spec) {
   if (!pnpmJs) {
@@ -128,6 +135,8 @@ if (!dryRun && existsSync(pkgPath)) {
   for (const b of defaults) if (!bundles.includes(b)) bundles.unshift(b)
   const added = []
   for (const plugin of wanted) {
+    // 只有声明了 dsh.bundle 的包才进组合层；否则会把非 bundle 包装进 profile 导致启动失败
+    if (plugin.bundle === false) continue
     if (!bundles.includes(plugin.name)) { bundles.push(plugin.name); added.push(plugin.name) }
   }
   // base 必须排在 web 之前

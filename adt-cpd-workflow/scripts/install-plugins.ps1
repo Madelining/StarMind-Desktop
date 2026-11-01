@@ -132,7 +132,8 @@ if ($DryRun) {
     Write-Host ("[dry-run] 将写入 bundles: " + ($bundles -join ', '))
 }
 else {
-    $pkg | ConvertTo-Json -Depth 20 | Set-Content $pkgPath -Encoding UTF8
+    # 必须无 BOM：应用的 JSON 解析器不接受 BOM
+    [System.IO.File]::WriteAllText($pkgPath, (ConvertTo-Json -InputObject $pkg -Depth 20), (New-Object System.Text.UTF8Encoding($false)))
     if ($added.Count -gt 0) {
         Write-Host ("-> bundles 已更新，新增: " + ($added -join ', '))
     }
