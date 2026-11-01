@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ADT / CPD 开发流程 · StarMind 一体化架构",
+    "locale": "zh-CN",
+    "output": ".archify/architecture-adt-cpd-20261101-125110/adt-cpd-architecture.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    { "id": "desktop", "type": "frontend", "label": "StarMind Desktop", "sublabel": "开发者本机客户端 · profile=desktop", "pos": [300, 50], "size": [200, 70] },
+    { "id": "sess-a", "type": "backend", "label": "会话 A · 远程镜像工作区", "sublabel": "cwd = 本地镜像 · rw_* 工具", "pos": [120, 170], "size": [220, 80] },
+    { "id": "sess-b", "type": "backend", "label": "会话 B · 远程整机界面", "sublabel": "经 SSH 隧道打开远端界面", "pos": [460, 170], "size": [220, 80] },
+    { "id": "mcp", "type": "messagebus", "label": "MCP 客户端", "sublabel": "挂载 cpdflow 的图接口", "pos": [800, 170], "size": [180, 70] },
+    { "id": "sched", "type": "backend", "label": "自动化任务", "sublabel": "到点投递回原会话", "pos": [140, 320], "size": [180, 62] },
+    { "id": "skills", "type": "database", "label": "Skill 目录", "sublabel": "按阶段加载 SKILL.md", "pos": [420, 320], "size": [180, 62] },
+    { "id": "subag", "type": "backend", "label": "子 agent", "sublabel": "派生执行 · 只吃日志", "pos": [660, 320], "size": [180, 62] },
+    { "id": "bgpack", "type": "database", "label": "背景包缓存", "sublabel": "/opt/bgpack · 只读", "tag": "artget 拉取 · 版本锁校验", "pos": [330, 455], "size": [190, 72] },
+    { "id": "devgate", "type": "backend", "label": "devgate 门禁 CLI", "sublabel": "/opt/ws 代码工作区 · 7 阶段 · 4 退出码", "pos": [320, 590], "size": [210, 90] },
+    { "id": "xvfb", "type": "backend", "label": "Xvfb + Qt(xcb)", "sublabel": "起界面 · 截图断言", "pos": [640, 599], "size": [180, 72] },
+    { "id": "dshweb", "type": "backend", "label": "dsh web", "sublabel": "远程整机界面的宿主", "pos": [470, 700], "size": [200, 66] },
+    { "id": "headless", "type": "backend", "label": "dsh --profile headless", "sublabel": "CI 无人值守入口", "pos": [820, 790], "size": [165, 64] },
+    { "id": "acp", "type": "backend", "label": "dsh --profile acp", "sublabel": "LangGraph 反向驱动", "pos": [820, 880], "size": [165, 64] },
+    { "id": "cpdflow", "type": "external", "label": "cpdflow", "sublabel": "LangGraph 工作流服务", "pos": [940, 440], "size": [200, 80] },
+    { "id": "evidence", "type": "database", "label": "devgate receipt + 截图", "sublabel": "绑定 commit 与背景包版本 · 回填原会话", "pos": [940, 599], "size": [190, 72] },
+    { "id": "bench", "type": "backend", "label": "联调脚本", "sublabel": "协议 · 时序断言", "tag": "需人工确认接线", "pos": [330, 1150], "size": [190, 70] },
+    { "id": "device", "type": "external", "label": "上下位机设备", "sublabel": "串口 / 专用协议", "pos": [580, 1150], "size": [190, 70] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Windows 开发者本机（内网）", "wraps": ["desktop", "sess-a", "sess-b", "mcp", "sched", "skills", "subag"] },
+    { "kind": "region", "label": "Linux 构建机 / 测试机 · build · qa · bench · release", "wraps": ["bgpack", "devgate", "xvfb", "dshweb", "headless", "acp"] },
+    { "kind": "security-group", "label": "背景包只读区 · sha256 校验", "wraps": ["bgpack"] },
+    { "kind": "region", "label": "制品与证据（可复算）", "wraps": ["evidence"] },
+    { "kind": "region", "label": "上下位机测试台 · 硬件在环", "wraps": ["bench", "device"] }
+  ],
+  "connections": [
+    { "id": "start-a", "from": "desktop", "to": "sess-a", "fromSide": "bottom", "toSide": "top", "via": [[400, 135], [230, 135]] },
+    { "id": "start-b", "from": "desktop", "to": "sess-b", "fromSide": "right", "toSide": "top", "via": [[530, 85], [530, 135], [570, 135]] },
+    { "id": "load-skill", "from": "sess-a", "to": "skills", "fromSide": "right", "toSide": "left", "via": [[365, 210], [365, 351]] },
+    { "id": "schedule-push", "from": "sess-a", "to": "sched", "fromSide": "bottom", "toSide": "top" },
+    { "id": "spawn-child", "from": "sess-b", "to": "subag", "fromSide": "right", "toSide": "top", "via": [[710, 210], [710, 300], [750, 300]] },
+    { "id": "mcp-to-cpdflow", "from": "mcp", "to": "cpdflow", "label": "stdio / HTTP", "fromSide": "right", "toSide": "top", "via": [[1040, 205]] },
+    { "id": "run-gate", "from": "sess-a", "to": "devgate", "label": "rw_exec · JSON + 退出码", "variant": "emphasis", "fromSide": "left", "toSide": "left", "via": [[60, 210], [60, 635]], "labelAt": [200, 635] },
+    { "id": "tunnel-ui", "from": "sess-b", "to": "dshweb", "label": "SSH 隧道", "fromSide": "bottom", "toSide": "top", "labelAt": [620, 430] },
+    { "id": "gate-check-pack", "from": "devgate", "to": "bgpack", "label": "sha256", "fromSide": "top", "toSide": "bottom", "labelAt": [470, 558] },
+    { "id": "gate-to-gui", "from": "devgate", "to": "xvfb", "label": "起界面 + 截图", "fromSide": "right", "toSide": "left" },
+    { "id": "gui-to-evidence", "from": "xvfb", "to": "evidence", "label": "截图证据", "fromSide": "right", "toSide": "left" },
+    { "id": "gate-to-bench", "from": "devgate", "to": "bench", "label": "仅 bench 环境 · 需人工确认接线", "variant": "security", "fromSide": "bottom", "toSide": "top", "labelAt": [560, 900] },
+    { "id": "bench-to-device", "from": "bench", "to": "device", "fromSide": "right", "toSide": "left" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Windows 客户端",
+      "items": [
+        "两种姿态：远程镜像会话 / 远程整机界面",
+        "本地会话只暴露 3 个 rw_* 配置工具",
+        "Skill、MCP、定时任务、子 agent 全在本机"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Linux 构建与测试机",
+      "items": [
+        "7 个阶段全部由 devgate 判定，模型只读结论",
+        "退出码 0/1/2/3 = 通过 / 代码问题 / 需人 / 环境问题",
+        "headless 供 CI，acp 供 LangGraph 反向驱动"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "证据与门凭证",
+      "items": [
+        "receipt 绑定 commit SHA 与背景包版本，并回填原会话",
+        "改代码即失效，发布前必须复验",
+        "截图与日志落到 /opt/qtqa/<line>/<commit>"
+      ]
+    }
+  ]
+}

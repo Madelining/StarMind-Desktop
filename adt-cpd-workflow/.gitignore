@@ -1,0 +1,30 @@
+# 依赖与产物
+node_modules/
+.pnpm-store/
+dist/
+build/
+out/
+
+# 例外：dsh-remote 声明了 bundleDependencies（ssh2 等），它的 node_modules 是
+# 离线安装的必需品，必须随仓库提交。
+!plugins/vendor/dsh-remote/node_modules/
+!plugins/vendor/dsh-remote/node_modules/**
+
+# StarMind / DSH 本地状态
+.devstate/
+*.log
+
+# 会话存档原文（可能含机器私密信息，导出稿在 discussion/ 里）
+*.jsonl
+*.jsonl.zstd
+
+# Office 临时文件
+~$*
+.dsh-office-*
+.archify/
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

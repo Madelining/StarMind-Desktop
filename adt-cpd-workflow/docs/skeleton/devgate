@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# devgate — ADT/CPD 阶段门禁骨架（P0）
+# 用法: devgate <stage> --line adt|cpd --workspace /opt/ws/adt/adt-main [--json]
+# 退出码: 0 pass | 1 fail | 2 blocked(需人) | 3 env-error
+# 设计要点: 只输出 JSON 到 stdout，日志一律写证据目录，绝不把人类可读文本混进 stdout。
+set -uo pipefail
+
+STAGE=""; LINE=""; WS=""; QUIET=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    env-check|build|verify|gui-smoke|bench|package|handoff) STAGE="$1"; shift;;
+    --line) LINE="$2"; shift 2;;
+    --workspace) WS="$2"; shift 2;;
+    --json) QUIET=1; shift;;
+    *) echo "unknown arg: $1" >&2; exit 3;;
+  esac
+done
+
+DEV_ROOT="${DEV_ROOT:-/opt/devgate}"
+ENV_JSON="$DEV_ROOT/env.json"
+[[ -n "$WS" ]] || WS="$(pwd)"
+
+say() { [[ $QUIET -eq 1 ]] || echo "$*" >&2; }
+now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+j()   { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }   # 最小 JSON 转义
+
+COMMIT="$(git -C "$WS" rev-parse --short=7 HEAD 2>/dev/null || echo unknown)"
+OUT="$DEV_ROOT/../qtqa/${LINE}/${COMMIT}"; OUT="$(cd "$DEV_ROOT" && realpath -m "$OUT" 2>/dev/null || echo "/opt/qtqa/${LINE}/${COMMIT}")"
+mkdir -p "$OUT" 2>/dev/null || true
+START_MS=$(date +%s%3N)
+T0="$(now)"
+
+emit() { # emit <status> <next> <blockers...>
+  local st="$1" next="$2" blockers="${3:-}"
+  local dur=$(( $(date +%s%3N) - START_MS ))
+  printf '{"schema":1,"stage":"%s","line":"%s","status":"%s","commit":"%s","startedAt":"%s","durationMs":%d,"workspace":"%s","evidence":[{"kind":"log","path":"%s/%s.log"}],"blockers":[%s],"next":"%s"}\n' \
+    "$STAGE" "$LINE" "$st" "$COMMIT" "$T0" "$dur" "$(j "$WS")" "$(j "$OUT")" "$STAGE" "$blockers" "$next"
+  case "$st" in
+    pass) exit 0;; fail) exit 1;; blocked) exit 2;; *) exit 3;;
+  esac
+}
+
+# ---------- S0 env-check ----------
+s0() {
+  local problems=()
+  [[ -f "$ENV_JSON" ]] || problems+=('{"code":"E_NO_ENV_JSON","hint":"缺少 /opt/devgate/env.json"}')
+  local lock="$WS/bgpack.lock.json"
+  [[ -f "$lock" ]] || problems+=('{"code":"E_NO_LOCK","hint":"仓库缺少 bgpack.lock.json"}')
+  command -v cmake >/dev/null || problems+=('{"code":"E_NO_CMAKE","hint":"未安装 cmake"}')
+
+  # 背景包一致性：锁文件里的版本必须在缓存里且 sha256 匹配（artget 具体路径待补）
+  if [[ -f "$lock" ]]; then
+    local ver path want got
+    ver=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$lock" | head -1)
+    path="/opt/bgpack/${LINE}/${ver}"
+    [[ -d "$path" ]] || problems+=("{\"code\":\"E_BGPACK_MISSING\",\"hint\":\"缺少背景包 ${ver}，执行 artget 拉取\"}")
+  fi
+
+  if ((${#problems[@]})); then
+    emit env-error "" "$(IFS=,; echo "${problems[*]}")"
+  fi
+  emit pass "build" ""
+}
+
+# ---------- S2 build ----------
+s2() {
+  local bdir="$WS/build" log="$OUT/build.log"
+  local gen="${CMAKE_GENERATOR:-Ninja}"
+  { cmake -S "$WS" -B "$bdir" -G "$gen" -DCMAKE_BUILD_TYPE=RelWithDebInfo &&
+    cmake --build "$bdir" -j"$(nproc)"; } >"$log" 2>&1
+  local rc=$?
+  local warns; warns=$(grep -c 'warning:' "$log" 2>/dev/null || echo 0)
+  if [[ $rc -ne 0 ]]; then
+    # 区分环境/代码：链接期找不到 .so 常见于背景包缺失
+    if grep -qE 'cannot find -l|No such file|could not find' "$log"; then
+      emit env-error "" '[{"code":"E_LINK_MISSING","hint":"链接失败，疑似背景包或库路径问题，先跑 env-check"}]'
+    fi
+    emit fail "build" "[{\"code\":\"E_BUILD\",\"hint\":\"编译失败，见 ${log}\"}]"
+  fi
+  [[ "$warns" -eq 0 ]] || emit fail "build" "[{\"code\":\"E_WARNING\",\"hint\":\"新增 ${warns} 条警告\"}]"
+  emit pass "verify" ""
+}
+
+# ---------- S4 gui-smoke ----------
+s4() {
+  local app="$WS/build/${APP_BIN:-adt_app}"
+  [[ -x "$app" ]] || emit fail "gui-smoke" '[{"code":"E_NO_BIN","hint":"找不到可执行文件，先跑 build"}]'
+
+  local disp="${XVFB_DISPLAY:-:99}"
+  pgrep -f "Xvfb $disp" >/dev/null || { Xvfb "$disp" -screen 0 1920x1080x24 >/dev/null 2>&1 & sleep 1; }
+  export DISPLAY="$disp" QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+
+  "$app" --no-splash >"$OUT/gui.log" 2>&1 &
+  local pid=$!
+  sleep "${GUI_WAIT_SEC:-12}"
+  if ! kill -0 "$pid" 2>/dev/null; then
+    emit fail "gui-smoke" '[{"code":"E_GUI_EXIT","hint":"进程在等待期内退出，见 gui.log"}]'
+  fi
+
+  mkdir -p "$OUT/shots"
+  if command -v import >/dev/null; then import -window root "$OUT/shots/main.png" 2>/dev/null
+  elif command -v grim >/dev/null; then grim "$OUT/shots/main.png" 2>/dev/null; fi
+  [[ -f "$OUT/shots/main.png" ]] || { kill "$pid" 2>/dev/null; emit env-error "" '[{"code":"E_NO_SHOT","hint":"截图工具不可用（import/grim）"}]'; }
+
+  if grep -qiE 'segmentation fault|terminate called|qFatal' "$OUT/gui.log"; then
+    kill "$pid" 2>/dev/null
+    emit fail "gui-smoke" '[{"code":"E_CRASH","hint":"日志含崩溃标记"}]'
+  fi
+
+  kill "$pid" 2>/dev/null
+  emit pass "bench" ""
+}
+
+case "$STAGE" in
+  env-check) s0;;
+  build)     s2;;
+  gui-smoke) s4;;
+  verify|bench|package|handoff)
+    emit blocked "" '[{"code":"E_NOT_IMPLEMENTED","hint":"该阶段在 P0 未实现，按需补 stages/ 脚本"}]';;
+  *) echo "usage: devgate <stage> --line <adt|cpd> --workspace <dir> [--json]" >&2; exit 3;;
+esac

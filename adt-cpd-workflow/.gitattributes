@@ -1,0 +1,6 @@
+# 第三方插件副本按原字节保存，避免 CRLF 归一化破坏包体
+plugins/vendor/** -text
+
+# 二进制交付物
+*.pptx binary
+*.png binary

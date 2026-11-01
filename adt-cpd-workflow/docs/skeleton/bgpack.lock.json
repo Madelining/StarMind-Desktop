@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "line": "adt",
+  "note": "背景包版本锁。由发布脚本更新，禁止手工改动。",
+  "packages": [
+    {
+      "id": "adt-bg-2026.10",
+      "version": "2026.10.2",
+      "source": "artget://intranet/adt",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "requiredModules": ["core", "hal", "ui-kit", "protocol-v3"]
+    }
+  ]
+}
