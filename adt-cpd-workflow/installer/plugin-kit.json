@@ -1,0 +1,58 @@
+{
+  "$comment": "安装器预置插件清单（B 方案）。由 NSIS 后置步骤调用 bootstrap-plugins.mjs 展开。",
+  "schema": 1,
+  "profile": "desktop",
+  "defaultBundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"],
+  "plugins": [
+    {
+      "name": "dsh-remote",
+      "version": "0.8.67",
+      "vendorDir": "vendor/dsh-remote",
+      "required": true
+    },
+    {
+      "name": "dsh-mnemon",
+      "version": "0.5.37",
+      "vendorDir": "vendor/dsh-mnemon",
+      "required": true
+    },
+    {
+      "name": "@tt-a1i/archify-dsh",
+      "version": "1.0.0",
+      "vendorDir": "vendor/@tt-a1i/archify-dsh",
+      "required": true
+    },
+    {
+      "name": "dsh-univer-office",
+      "version": "0.3.9",
+      "vendorDir": null,
+      "required": true,
+      "note": "186.9 MB，不随安装包分发；安装时需要能访问 npm 源（或内网镜像）"
+    },
+    {
+      "name": "dsh-builtin-browser",
+      "version": "0.5.2",
+      "vendorDir": "vendor/dsh-builtin-browser",
+      "required": true
+    },
+    {
+      "name": "@liustack/modlens",
+      "version": "3.27.2",
+      "vendorDir": "vendor/@liustack/modlens",
+      "required": true
+    },
+    {
+      "name": "dsh-plugin-save-token",
+      "version": "2.4.1",
+      "vendorDir": "vendor/dsh-plugin-save-token",
+      "required": true
+    }
+  ],
+  "excluded": [
+    {
+      "name": "@perrylink/dsh-github",
+      "version": "0.7.28",
+      "reason": "按需求不随安装包默认安装；需要时用 install-plugins.ps1 单独装"
+    }
+  ]
+}

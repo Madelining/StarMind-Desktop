@@ -56,6 +56,7 @@ devgate env-check --line adt --workspace /opt/ws/adt/adt-main --json
 | 评审材料（3 页 PPT） | ✅ 已产出，含演讲者备注 |
 | `devgate` 门禁骨架 | ⚠️ 三段可用（env-check / build / gui-smoke），**未在 Linux 上实测**；verify / bench / package / handoff 为占位 |
 | 插件清单与安装脚本 | ⚠️ 清单准确；安装脚本**未在干净机器上端到端验证** |
+| 安装器集成（`installer/`） | 🚧 脚本已就位（`bootstrap-plugins.mjs` + `plugin-kit.json`），**尚未接入产品安装器的 NSIS `customInstall`**，也未出过内部分发包；详见 [`installer/README.md`](installer/README.md) |
 | 架构图 | ✅ `docs/architecture/adt-cpd-architecture.html`——archify `finalize` 四道门全绿（validate / deliver / check / browser-check）；源文件为同名 `.candidate.json`。**视觉观感未经人眼确认**，自动检查只覆盖几何与可读性阈值 |
 | `artget` 集成 | ❌ 待补（命令格式 / 版本来源 / 落地路径未定） |
 | CMake / Qt 具体参数 | ❌ 待补（目标名、生成器、Qt 版本、ctest 现状） |
