@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "requestId": "beta-windows-x64-after-plugin-kit-parity",
+  "channel": "beta",
+  "reason": "Rebuild the Windows Setup after synchronizing existing plugin-kit packaging resources across desktop variants."
+}

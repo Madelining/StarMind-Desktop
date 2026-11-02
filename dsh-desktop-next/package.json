@@ -418,6 +418,18 @@
         {
           "from": ".desktop-build/runtime",
           "to": "runtime"
+        },
+        {
+          "from": "../adt-cpd-workflow/installer/bootstrap-plugins.mjs",
+          "to": "plugin-kit/bootstrap-plugins.mjs"
+        },
+        {
+          "from": "../adt-cpd-workflow/installer/plugin-kit.json",
+          "to": "plugin-kit/plugin-kit.json"
+        },
+        {
+          "from": "../adt-cpd-workflow/plugins/vendor",
+          "to": "plugin-kit/vendor"
         }
       ]
     },
