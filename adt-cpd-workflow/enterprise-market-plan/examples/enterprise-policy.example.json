@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "mode": "enterprise",
+  "marketId": "com.company.starmind",
+  "expectedOrigin": "https://plugins.company.example",
+  "channelUrl": "https://plugins.company.example/channels/stable.json",
+  "allowHttp": false,
+  "channelMaxAgeSeconds": 86400
+}

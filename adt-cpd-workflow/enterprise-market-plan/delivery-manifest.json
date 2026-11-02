@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-03",
+  "codeBaseline": "5d8fad25d136de2371c39f87a6013ffe441e3105",
+  "scope": "detailed-design-task-cards-and-tested-fixture-tools",
+  "productionImplemented": false,
+  "files": [
+    {
+      "path": "00-START-HERE.md",
+      "size": 4276,
+      "sha256": "53df4c8ef451f3e6f87e90f76625552170f235db5f39d98a129fbb9d232e342e"
+    },
+    {
+      "path": "01-design.md",
+      "size": 10902,
+      "sha256": "8232f6bf7b98517b39fc4f69c8341a008718597c28451eb7d4efe49c63b7780f"
+    },
+    {
+      "path": "02-client.md",
+      "size": 21732,
+      "sha256": "9be32344bcef5dd03d0a4253026f3e15d8bf3ec2ac5cdf1ae61cf93c7dbf60de"
+    },
+    {
+      "path": "03-server-offline.md",
+      "size": 40058,
+      "sha256": "9eaf1c65291b37b810398200c301fbdeaa3f9c80dd59322d946e1cd18f08c184"
+    },
+    {
+      "path": "04-task-cards.md",
+      "size": 31455,
+      "sha256": "663265737f6b4d3de894a1eb5c34a183b1f69baca18325bebea5453c73f6814b"
+    },
+    {
+      "path": "05-acceptance.md",
+      "size": 6210,
+      "sha256": "d35f8ae1b29708e1599b02b139b62bd762712663a5cfdc9eb79f9213e031df03"
+    },
+    {
+      "path": "06-offline-materials.md",
+      "size": 3886,
+      "sha256": "356ca93005e1325877ca7c413103b324c811620b799e1a0513a52fa5c7957f7c"
+    },
+    {
+      "path": "contracts/client-api.d.ts",
+      "size": 3072,
+      "sha256": "be2b5a7da455627683fdfcf709853d82cdc175347e4030287ecbb0cd835b77ba"
+    },
+    {
+      "path": "contracts/contracts.ts",
+      "size": 4387,
+      "sha256": "53aff87422c6f6cf5b16ec133f2514cffd16e908486e8b0d0b78d27d606a8027"
+    },
+    {
+      "path": "contracts/README.md",
+      "size": 2429,
+      "sha256": "7d7f589b4dbcfd08d1b858343ed9aa6fc7e6fe2b39efe15b96b0d4a3e5fc629e"
+    },
+    {
+      "path": "contracts/service-api.d.ts",
+      "size": 4958,
+      "sha256": "6145d24e4b5ac65ff4641cbcd76d1e445b39b6f85b1712137f6cd7eea1930a89"
+    },
+    {
+      "path": "evidence/tool-validation.json",
+      "size": 537,
+      "sha256": "388b221c9cd26a23a3171b3208f85d87cb9bcd6bedf2c9e86d8fa873a897db8c"
+    },
+    {
+      "path": "examples/enterprise-policy.example.json",
+      "size": 269,
+      "sha256": "514c645449487d6a9e4179112b49f7a61d4443c13b2fcc0a1906084d9d1cc6ea"
+    },
+    {
+      "path": "examples/prepare-input.example.json",
+      "size": 825,
+      "sha256": "957d0c1b377febc155130e68d4f7705f47d088c8d547a45947a3821bbee57164"
+    },
+    {
+      "path": "tools/create-fixtures.mjs",
+      "size": 7363,
+      "sha256": "3e2b5beb6e8690e7d8688afcf96f12dbfe41f314e8d6a366a78ca7ace2500d5e"
+    },
+    {
+      "path": "tools/fixtures.test.mjs",
+      "size": 7118,
+      "sha256": "60080e333373f25bf706e324a466fdb899efc8f128aebddfcd1dc154736ed90b"
+    },
+    {
+      "path": "tools/README.md",
+      "size": 3078,
+      "sha256": "716d24e30c6742659a1071812b36743757571d88b6c0acc50dfe4b91806bcbd7"
+    },
+    {
+      "path": "tools/serve-fixtures.mjs",
+      "size": 6728,
+      "sha256": "e14a85f0ae0ab46cf258684aba43d9b7484022b75c21185ed723d387b74a67d5"
+    }
+  ]
+}
