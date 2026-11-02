@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "product": "StarMind Beta",
+  "version": "2.0.21-beta.1",
+  "platform": "win32",
+  "arch": "x64",
+  "sourceCommit": "9367c6187e678662786c0b5a790e4d1ff2c93db9",
+  "runId": 41500673402,
+  "artifactId": 13167764526,
+  "artifactName": "StarMind-Beta-Windows-x64-2",
+  "downloadPage": "https://github.com/Madelining/StarMind-Desktop/actions/runs/41500673402/artifacts/13167764526",
+  "archiveBytes": 334881464,
+  "archiveSha256": "aa9438616a3e3dc5ee65f27a5e7ead5f0f2627b66c48a54fa3358e009fb81ad0",
+  "installerFilename": "StarMind-Beta-2.0.21-beta.1-x64-Setup.exe",
+  "signed": false,
+  "enterpriseMarketImplemented": false,
+  "expiresAt": "2027-01-31T18:26:59Z"
+}
