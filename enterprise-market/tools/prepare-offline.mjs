@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { inspectTarball } from '../src/archive.mjs'
 import { checkPublication } from '../src/dependencies.mjs'
 import semver from '../vendor/semver/index.js'
@@ -135,7 +135,10 @@ export async function prepareOffline(options) {
   const temporary = await mkdtemp(join(tmpdir(), 'starmind-prepare-'))
   const pending = `${output}.${process.pid}.tmp`
   try {
-    const dependencies = { [plugin.name]: rootBytes ? pathToFileURL(resolve(options.tarball)).href : plugin.version }
+    // npm's file-URL handling can retain percent escapes in Windows short paths.
+    // Keep the input bytes unchanged, but resolve an ASCII relative filename instead.
+    if (rootBytes) await writeFile(join(temporary, 'root-package.tgz'), rootBytes, { flag: 'wx' })
+    const dependencies = { [plugin.name]: rootBytes ? 'file:./root-package.tgz' : plugin.version }
     await writeFile(join(temporary, 'package.json'), JSON.stringify({ name: 'starmind-offline-preparation', version: '1.0.0', private: true, dependencies }))
     await writeFile(join(temporary, '.npmrc'), `registry=${registry.href}\nignore-scripts=true\naudit=false\nfund=false\n`)
     const userConfig = join(temporary, 'user.npmrc'), globalConfig = join(temporary, 'global.npmrc')

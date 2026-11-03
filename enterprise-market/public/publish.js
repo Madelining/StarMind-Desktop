@@ -77,7 +77,7 @@ export function createPublisher({ api, toast, openDetail, onUserChange, onPublis
       if (mode() === 'bundle') {
         const file = $('bundleFile').files[0]; if (!file) throw new Error('请选择离线包。');
         // Import format is JSON/base64; enforce an explicit memory bound before parsing.
-        if (file.size > 384 * 1024 * 1024) throw new Error('离线 JSON 包超过 384 MB，请改用管理员命令导入，避免浏览器内存不足。');
+        if (file.size > 384 * 1024 * 1024) throw new Error('离线 JSON 包超过 384 MiB 导入上限，请由插件维护者缩小包集或拆分独立插件后重新打包。');
         let bundle; try { bundle = JSON.parse(await file.text()); } catch { throw new Error('无法读取离线包 JSON，请下载完整的 .bundle.json 文件。'); }
         if (bundle?.schema !== 'starmind.enterprise-market.bundle' || bundle.schemaVersion !== 1) throw new Error('离线包格式不受支持，需要 starmind.enterprise-market.bundle v1。');
         data = await api('api/import', { method: 'POST', body: JSON.stringify(bundle) });
@@ -91,8 +91,9 @@ export function createPublisher({ api, toast, openDetail, onUserChange, onPublis
     } catch (failure) { error(failure.message); }
     finally { busy = false; ready(); }
   });
-  async function renderMine(grid) {
+  async function renderMine(grid, shouldRender = () => true) {
     const data = await api('api/releases/mine'), releases = data.releases ?? [];
+    if (!shouldRender()) return releases.length;
     grid.replaceChildren(...releases.map(release => {
       const withdrawn = release.withdrawn || release.status === 'withdrawn', name = release.name, title = text(release.title, name), actions = el('div', { className: 'card-actions' });
       const download = downloadUrl(release.downloadUrl, release.id); if (download) actions.append(el('a', { className: 'button secondary', href: download, download: '' }, '下载'));
@@ -100,7 +101,7 @@ export function createPublisher({ api, toast, openDetail, onUserChange, onPublis
         const button = event.currentTarget;
         if (!await messageBox('撤回这个版本？', `${name}@${release.version}\n撤回后停止新的市场发现；已安装、已下载的包与历史锁文件仍然可用。`, '撤回版本', true)) return;
         button.disabled = true;
-        try { await api(`api/releases/${encodeURIComponent(release.id)}/withdraw`, { method: 'POST', body: '{}' }); toast('已撤回此发布版本。'); await renderMine(grid); onPublished(); } catch (failure) { toast(failure.message, true); button.disabled = false; }
+        try { await api(`api/releases/${encodeURIComponent(release.id)}/withdraw`, { method: 'POST', body: '{}' }); toast('已撤回此发布版本。'); await renderMine(grid, shouldRender); onPublished(); } catch (failure) { toast(failure.message, true); button.disabled = false; }
       } }, '撤回'));
       return el('article', { className: 'plugin-card' }, el('div', { className: 'card-top' }, icon(title), el('div', { className: 'card-title' }, el('button', { className: 'title-button', type: 'button', onClick: () => openDetail(name, release) }, title), el('span', { className: 'package-name' }, name))), el('p', { className: 'card-description' }, text(release.description, '暂无简介。')), el('div', { className: 'card-meta' }, el('span', { className: `tag ${withdrawn ? 'warning' : 'success'}` }, withdrawn ? '已撤回' : '已发布'), el('span', {}, date(release.publishedAt)), el('span', {}, `${release.packageCount ?? release.packages?.length ?? 0} 个包`)), el('div', { className: 'card-bottom' }, el('span', { className: 'version' }, `v${release.version}`), actions));
     }));

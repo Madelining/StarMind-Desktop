@@ -18,11 +18,12 @@ export function createInstalled({ bridge, api, openDetail, isActive, onChange, t
     } catch (error) { toast(error.message, true); }
     finally { busy = false; button.disabled = false; }
   }
-  async function render(grid, reload = true) {
+  async function render(grid, reload = true, shouldRender = isActive) {
     activeGrid = grid; if (reload) await refresh();
     let plugins = [];
     try { const data = await api('api/catalog?sort=newest'); plugins = data.plugins ?? []; }
     catch { toast('公司目录暂时不可达，仍显示 StarMind 返回的本地插件状态。'); }
+    if (!shouldRender()) return bundles.length;
     grid.replaceChildren(...bundles.map(bundle => {
       const plugin = plugins.find(item => item.name === bundle.name), name = bundle.name, title = text(plugin?.title, name), actions = el('div', { className: 'card-actions' });
       if (plugin) actions.append(el('button', { className: 'button secondary', type: 'button', onClick: () => openDetail(name) }, plugin.latestVersion !== bundle.version ? '查看可用版本' : '查看详情'));

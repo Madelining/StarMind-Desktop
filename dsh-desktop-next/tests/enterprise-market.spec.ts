@@ -55,6 +55,16 @@ it('a public remote install cannot bypass the exact-version guard', async () => 
   await expect(manager.setBundleEnabled('dshmarket', true)).rejects.toThrow()
   expect(installs).toBe(0)
 })
+it('blocks both public document and image-CDN readers before the original methods run', async () => {
+  const { home, profile } = setup(); const market = new EnterpriseMarket(home, profile)
+  const unexpected = async (): Promise<never> => { throw new Error('external reader must not run') }
+  const manager: EnterprisePluginManager = { async listBundles() { return [] }, async installBundle() { return {} }, async updateBundle() { return {} }, async removeBundle() { return {} }, async setBundleEnabled() { return {} }, readBundleDetail: unexpected, serveDetailFile: unexpected }
+  market.guard(manager)
+  await expect(manager.readBundleDetail!()).rejects.toThrow('公共 CDN')
+  const image = await manager.serveDetailFile!(new Request('http://127.0.0.1/api/plugin-manager/detail-file?bundle=example'))
+  expect(image.status).toBe(404)
+  expect(await image.text()).toBe('企业模式请在企业市场查看插件说明')
+})
 it('portal proxy isolates origins, strips Host credentials and refuses redirects or cross-origin writes', async () => {
   const { home, profile } = setup()
   let forwardedCookie: string | undefined, forwardedOrigin: string | undefined

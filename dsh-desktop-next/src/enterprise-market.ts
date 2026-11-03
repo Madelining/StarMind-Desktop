@@ -76,6 +76,7 @@ export interface EnterprisePluginManager {
   inspect?(spec: string, options?: Record<string, unknown>, signal?: AbortSignal): Promise<unknown>
   listVersions?(name: string, options?: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>>
   readBundleDetail?(...args: unknown[]): Promise<unknown>
+  serveDetailFile?(request: Request): Promise<Response>
 }
 
 /** Bounded JSON request; redirects never turn a local policy into a different server. */
@@ -217,6 +218,10 @@ export class EnterpriseMarket {
     if (manager.readBundleDetail) manager.readBundleDetail = async () => {
       throw new Error('企业模式请在企业市场查看插件说明；官方公共 CDN 详情读取已停用')
     }
+    // Images have a separate authenticated Fetch route and do not call readBundleDetail.
+    if (manager.serveDetailFile) manager.serveDetailFile = async () => new Response('企业模式请在企业市场查看插件说明', {
+      status: 404, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+    })
     // The public UI's registry-derived version picker must not offer retained, unapproved versions.
     const versions = manager.listVersions?.bind(manager)
     if (versions) manager.listVersions = async (name, options, signal) => {

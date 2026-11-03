@@ -124,6 +124,11 @@ try {
   writeFileSync(join(home, 'enterprise-market.json'), JSON.stringify({ schemaVersion: 1, enabled: true, url: market.origin, allowHttp: true }))
   let session = await boot()
   const { operation, rpc } = session
+  const image = await fetch(`${session.origin}/api/plugin-manager/detail-file?bundle=example&document=README.md&path=logo.png`, {
+    headers: { cookie: session.cookie, origin: session.origin },
+  })
+  assert.equal(image.status, 404)
+  assert.equal(await image.text(), '企业模式请在企业市场查看插件说明')
   const connected = await fetch(`${session.origin}/api/enterprise-market/connect`, {
     method: 'POST', headers: { cookie: session.cookie, origin: session.origin, 'content-type': 'application/json', 'x-starmind-market-request': '1' }, body: '{}',
   })

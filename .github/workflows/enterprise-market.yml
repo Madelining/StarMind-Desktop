@@ -69,6 +69,8 @@ jobs:
       - run: yarn install --immutable
       - name: Verify Beta and Next boundaries
         run: yarn check:desktop-variants
+      - name: Build bundled community market before Host checks
+        run: yarn workspace dsh-community-market build
       - name: Validate Beta product
         run: yarn workspace dsh-plugin-desktop-beta check
       - name: Validate Next product
@@ -154,3 +156,52 @@ jobs:
           retention-days: 90
           if-no-files-found: error
           compression-level: 6
+
+  release:
+    needs: [desktop, market-windows-delivery]
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: StarMind-Enterprise-Market-Windows-Client-${{ github.run_number }}
+          path: client
+      - uses: actions/download-artifact@v6
+        with:
+          name: StarMind-Market-Server-Windows-x64-${{ github.run_number }}
+          path: StarMind-Market-Server-Windows-x64
+      - name: Publish the verified Windows deliveries
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'enterprise-market-${{ github.run_number }}'
+          $out = Join-Path $env:RUNNER_TEMP 'release-assets'
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          $installers = @(Get-ChildItem -LiteralPath 'client' -Filter '*-x64-Setup.exe' -File)
+          if ($installers.Count -ne 1) { throw 'Expected one verified client installer' }
+          Copy-Item -LiteralPath $installers[0].FullName -Destination $out
+          Copy-Item -LiteralPath 'client/build-info.json' -Destination (Join-Path $out 'client-build-info.json')
+          $serverZip = Join-Path $out 'StarMind-Market-Server-Windows-x64.zip'
+          Compress-Archive -LiteralPath 'StarMind-Market-Server-Windows-x64' -DestinationPath $serverZip
+          $assets = @(Get-ChildItem -LiteralPath $out -File)
+          $assets | ForEach-Object { "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)" } | Set-Content -LiteralPath (Join-Path $out 'SHA256SUMS.txt') -Encoding utf8NoBOM
+          $notes = @"
+          StarMind 2.0.21-beta.2 企业插件市场测试版，Windows x64，安装包未签名。
+
+          - Setup.exe：安装客户端，在侧栏“企业市场”配置内网地址。
+          - Server ZIP：含 Node、npm 和市场全部运行依赖，完整解压后按 README 部署，无需联网 npm install。
+          - 支持原始 DSH tgz + 完整依赖上传、离线包导入导出、真实插件管理器安装与版本管理。
+          - 插件运行时所需的模型/API/浏览器等外部资源仍需自行提供内网替代；需安装脚本的包应先制作离线预构建版本。
+
+          来源提交：$env:GITHUB_SHA
+          本次检查：$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
+          部署说明：https://github.com/$env:GITHUB_REPOSITORY/blob/$env:GITHUB_SHA/enterprise-market/README.md
+          "@
+          $notesPath = Join-Path $env:RUNNER_TEMP 'enterprise-release-notes.md'
+          $notes | Set-Content -LiteralPath $notesPath -Encoding utf8NoBOM
+          $assetPaths = @(Get-ChildItem -LiteralPath $out -File | Select-Object -ExpandProperty FullName)
+          gh release create $tag @assetPaths --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'StarMind 企业插件市场 · 2.0.21-beta.2' --notes-file $notesPath
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub prerelease publication failed' }

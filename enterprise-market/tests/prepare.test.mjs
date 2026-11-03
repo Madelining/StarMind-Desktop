@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { downloadArchive, lockArtifacts, npmEnvironment, parseArgs, prepareOffline, validateRemote, verifyIntegrity } from '../tools/prepare-offline.mjs'
@@ -83,7 +83,9 @@ test('real npm resolves a scoped plugin and its dependency from only the loopbac
   const exported = packages.find(item => item.manifest.name === rootName)
   assert.equal(exported.integrity, inspectTarball(rootBytes).integrity)
   await assert.rejects(prepareOffline({ plugin: `${rootName}@1.0.0`, registry, output }), /已存在/u)
-  const local = join(temporary, 'plugin.tgz')
+  const localDirectory = join(temporary, 'local ~ offline%20 中文')
+  await mkdir(localDirectory)
+  const local = join(localDirectory, 'plugin ~ offline%20.tgz')
   await writeFile(local, rootBytes)
   const localOutput = join(temporary, 'local.dshbundle.json')
   const localResult = await prepareOffline({ tarball: local, registry, output: localOutput })

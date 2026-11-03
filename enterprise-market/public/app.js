@@ -7,7 +7,7 @@ import { createInstalled } from './installed.js';
 initUi();
 const state = { view: 'discover', plugins: [], categories: [], total: 0, category: '', favoritesOnly: false, favorites: new Set(), installed: [], busy: false };
 try { const saved = JSON.parse(localStorage.getItem('starmind.market.favorites') ?? '[]'); if (Array.isArray(saved)) state.favorites = new Set(saved.filter(v => typeof v === 'string')); } catch { /* Favorites are optional local state. */ }
-let publisher, queryController, searchTimer;
+let publisher, queryController, searchTimer, viewTicket = 0;
 const api = createApi(() => publisher?.token ?? '');
 const bridge = new DesktopBridge(() => {
   $('bridgeBadge').textContent = '已连接 StarMind'; $('bridgeBadge').classList.add('connected'); $('embeddedNotice').hidden = false;
@@ -93,6 +93,7 @@ async function openDetail(name, ownRelease = null) {
     const actions = el('div', { className: 'detail-actions' });
     const packages = el('div', { className: 'package-table-wrapper' });
     const readme = el('div');
+    const warnings = el('div', { role: 'note' });
     const meta = el('div', { className: 'detail-metadata' });
     const installedInfo = el('p', { className: 'small muted' });
     function update() {
@@ -101,6 +102,9 @@ async function openDetail(name, ownRelease = null) {
       meta.replaceChildren(el('span', { className: 'tag' }, plugin.category || '其他'));
       if (!release) { actions.append(el('span', { className: 'muted' }, '暂无可用版本')); return; }
       readme.replaceChildren(markdown(release.readme ?? plugin.readme));
+      const notices = Array.isArray(release.warnings) ? release.warnings : [];
+      warnings.hidden = notices.length === 0;
+      warnings.replaceChildren(...notices.map(notice => el('p', { className: 'small warning' }, `${text(notice.message, notice.code ?? '请验证目标环境兼容性')}${notice.package ? `（${notice.package}）` : ''}`)));
       const current = state.installed.find(bundle => bundle.name === name), withdrawn = release.withdrawn || release.status === 'withdrawn';
       const download = downloadUrl(release.downloadUrl, release.id);
       if (download) actions.append(el('a', { className: 'button secondary', href: download, download: '' }, '下载离线包'));
@@ -113,14 +117,16 @@ async function openDetail(name, ownRelease = null) {
       packages.replaceChildren(entries.length ? el('table', { className: 'package-table' }, el('thead', {}, el('tr', {}, el('th', { scope: 'col' }, '包名'), el('th', { scope: 'col' }, '版本'), el('th', { scope: 'col' }, '大小'))), el('tbody', {}, ...entries.map(pkg => el('tr', {}, el('td', {}, pkg.name), el('td', {}, pkg.version), el('td', {}, bytes(pkg.size)))))) : el('p', { className: 'small muted' }, '此版本未返回详细包清单。'));
     }
     select.addEventListener('change', update);
-    $('detailContent').replaceChildren(el('div', { className: 'detail-heading' }, icon(title), el('div', {}, el('h2', { id: 'detailTitle' }, title), el('span', { className: 'package-name' }, name))), el('p', { className: 'detail-summary' }, text(plugin.description, '发布者暂未提供简介。')), meta, actions, installedInfo, status, el('section', { className: 'detail-section' }, el('h3', {}, '使用说明'), readme), el('section', { className: 'detail-section' }, el('h3', {}, '插件与依赖'), packages));
+    $('detailContent').replaceChildren(el('div', { className: 'detail-heading' }, icon(title), el('div', {}, el('h2', { id: 'detailTitle' }, title), el('span', { className: 'package-name' }, name))), el('p', { className: 'detail-summary' }, text(plugin.description, '发布者暂未提供简介。')), meta, actions, installedInfo, warnings, status, el('section', { className: 'detail-section' }, el('h3', {}, '使用说明'), readme), el('section', { className: 'detail-section' }, el('h3', {}, '插件与依赖'), packages));
     update();
   } catch (error) { $('detailContent').replaceChildren(el('h2', { id: 'detailTitle' }, '无法读取插件详情'), el('p', { className: 'form-error', role: 'alert' }, error.message), el('button', { className: 'button secondary', type: 'button', onClick: () => openDetail(name) }, '重试')); }
 }
 const installed = createInstalled({ bridge, api, openDetail, isActive: () => state.view === 'installed', onChange: values => { state.installed = values; $('installedCount').hidden = false; $('installedCount').textContent = String(values.length); }, toast });
 publisher = createPublisher({ api, toast, openDetail, onUserChange: user => { $('loginButton').hidden = !!user; $('userName').hidden = !user; $('logoutButton').hidden = !user; $('userName').textContent = user?.name ?? ''; if (state.view === 'mine') loadView(); }, onPublished: () => { loadCatalog(); if (state.view === 'mine') loadView(); } });
 async function loadView() {
+  const view = state.view, ticket = ++viewTicket, current = () => ticket === viewTicket && state.view === view;
   const discover = state.view === 'discover'; $('discoveryControls').hidden = !discover; $('emptyState').hidden = true; $('pluginGrid').replaceChildren();
+  $('viewStatus').textContent = '';
   $('sectionTitle').textContent = discover ? '全部插件' : state.view === 'installed' ? '当前 Profile 已安装' : '我发布的版本'; $('resultCount').textContent = '';
   $('sectionHint').textContent = discover ? '精确版本 · 内网分发' : state.view === 'installed' ? '状态来自 StarMind 插件管理器' : '撤回保留已下载和已安装的版本';
   if (discover) return loadCatalog();
@@ -128,13 +134,13 @@ async function loadView() {
   try {
     if (state.view === 'installed') {
       if (!bridge.capabilities?.list) { empty('从 StarMind 查看已安装插件', '独立浏览器不能读取或修改你的本机 Profile。请使用 StarMind 的企业插件市场入口。'); return; }
-      const count = await installed.render($('pluginGrid')); $('resultCount').textContent = `${count} 个插件`; if (!count) empty('当前 Profile 还没有插件', '在发现页挑选需要的插件，由 StarMind 确认后安装。', '发现插件', () => switchView('discover'));
+      const count = await installed.render($('pluginGrid'), true, current); if (!current()) return; $('resultCount').textContent = `${count} 个插件`; $('viewStatus').textContent = `已显示 ${count} 个本机插件。`; if (!count) empty('当前 Profile 还没有插件', '在发现页挑选需要的插件，由 StarMind 确认后安装。', '发现插件', () => switchView('discover'));
     } else {
       if (!publisher.user) { empty('登录后管理自己的发布', '浏览和下载无需登录；发布、导入离线包或撤回自己的版本需要发布者令牌。', '发布者登录', () => publisher.login()); return; }
-      const count = await publisher.renderMine($('pluginGrid')); $('resultCount').textContent = `${count} 个版本`; if (!count) empty('你还没有发布插件', '上传原始插件包及全部依赖，或导入市场离线包。', '发布插件', () => publisher.open());
+      const count = await publisher.renderMine($('pluginGrid'), current); if (!current()) return; $('resultCount').textContent = `${count} 个版本`; $('viewStatus').textContent = `已显示 ${count} 个发布版本。`; if (!count) empty('你还没有发布插件', '上传原始插件包及全部依赖，或导入市场离线包。', '发布插件', () => publisher.open());
     }
-  } catch (error) { empty('暂时无法读取', error.message, '重试', loadView); }
-  finally { loading(false); }
+  } catch (error) { if (current()) empty('暂时无法读取', error.message, '重试', loadView); }
+  finally { if (current()) loading(false); }
 }
 function switchView(view) { state.view = view; document.querySelectorAll('[data-view]').forEach(button => { const active = button.dataset.view === view; button.classList.toggle('active', active); if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); }); loadView(); }
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => switchView(button.dataset.view)));
