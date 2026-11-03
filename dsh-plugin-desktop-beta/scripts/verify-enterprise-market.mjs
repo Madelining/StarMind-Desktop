@@ -1,6 +1,6 @@
 /** Real headless Host + real pnpm: two plugins, update, activation failure, restart and removal. */
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -149,7 +149,8 @@ try {
   success(await operation({ action: 'install', packageName: PLUGIN, version: '1.0.0' }))
   assert.equal(installedVersion(PLUGIN), '1.0.0')
   await activePlugin(session, PLUGIN)
-  const pluginRequire = createRequire(join(profileDirectory, 'node_modules', PLUGIN, 'package.json'))
+  // pnpm's dependency links belong to the real package directory, not its top-level projection.
+  const pluginRequire = createRequire(realpathSync(join(profileDirectory, 'node_modules', PLUGIN, 'package.json')))
   assert.equal(JSON.parse(readFileSync(join(dirname(pluginRequire.resolve(HELPER)), 'package.json'), 'utf8')).version, '1.0.0')
   success(await operation({ action: 'install', packageName: second, version: '1.0.0' }))
   assert.equal(installedVersion(second), '1.0.0')
