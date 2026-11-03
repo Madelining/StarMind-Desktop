@@ -1,9 +1,10 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
-import { EnterpriseMarket, createEnterprisePortalProxy, enterpriseProfileIssues, parseEnterpriseMarketConfig, type EnterprisePluginManager } from '../src/enterprise-market.ts'
+import { pathToFileURL } from 'node:url'
+import { EnterpriseMarket, createEnterprisePortalProxy, enterprisePackageParent, enterpriseProfileIssues, parseEnterpriseMarketConfig, type EnterprisePluginManager } from '../src/enterprise-market.ts'
 
 const temporary: string[] = []
 function setup() {
@@ -14,6 +15,38 @@ function setup() {
   return { home, profile }
 }
 afterEach(() => { vi.unstubAllEnvs(); for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true }) })
+it('anchors profile plugin imports to the currently installed package after a pnpm junction moves', () => {
+  const { home, profile } = setup(), name = '@company/smoke'
+  writeFileSync(join(profile, 'package.json'), JSON.stringify({ dependencies: { [name]: '1.0.0' } }))
+  mkdirSync(join(profile, 'node_modules', '@company'), { recursive: true })
+  const projection = join(profile, 'node_modules', name), installation = new Set<string>()
+  const parents: string[] = []
+  for (const version of ['1.0.0', '1.1.0']) {
+    const target = join(home, 'releases', version)
+    mkdirSync(target, { recursive: true }); writeFileSync(join(target, 'package.json'), JSON.stringify({ name, version }))
+    if (parents.length) unlinkSync(projection)
+    symlinkSync(target, projection, 'junction')
+    const parent = enterprisePackageParent(`${name}/exported`, profile, installation)
+    expect(parent).toBe(pathToFileURL(realpathSync(join(target, 'package.json'))).href)
+    parents.push(parent!)
+  }
+  expect(parents[0]).not.toBe(parents[1])
+  expect(enterprisePackageParent(name, profile, new Set([name]))).toBeUndefined()
+  for (const specifier of ['cordis:group', './local.js', 'node:fs', '@company/unrelated']) {
+    expect(enterprisePackageParent(specifier, profile, installation)).toBeUndefined()
+  }
+})
+it('fails a declared plugin import instead of falling back to stale code when its installation is missing or invalid', () => {
+  const { profile } = setup(), name = 'company-smoke'
+  writeFileSync(join(profile, 'package.json'), JSON.stringify({ dependencies: { [name]: '1.1.0' } }))
+  const directory = join(profile, 'node_modules', name), installation = new Set<string>()
+  expect(() => enterprisePackageParent(name, profile, installation)).toThrow()
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(join(directory, 'package.json'), JSON.stringify({ name: 'wrong-package' }))
+  expect(() => enterprisePackageParent(name, profile, installation)).toThrow('安装清单无效')
+  writeFileSync(join(directory, 'package.json'), '{broken')
+  expect(() => enterprisePackageParent(name, profile, installation)).toThrow()
+})
 it('requires an explicit HTTP decision and rejects URL credentials or remote policy fields', () => {
   expect(() => parseEnterpriseMarketConfig({ schemaVersion: 1, enabled: true, url: 'http://company.internal', allowHttp: false })).toThrow()
   expect(() => parseEnterpriseMarketConfig({ schemaVersion: 1, enabled: true, url: 'https://u:p@company.internal', allowHttp: false })).toThrow()

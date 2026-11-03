@@ -1,10 +1,11 @@
 /** Desktop-owned enterprise routing. Package state and operations remain owned by DSH's manager. */
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import http, { type IncomingMessage, type ServerResponse } from 'node:http'
 import https from 'node:https'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { Context } from '@deepseek-ai/cordis'
@@ -78,6 +79,40 @@ export interface EnterprisePluginManager {
   listVersions?(name: string, options?: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>>
   readBundleDetail?(...args: unknown[]): Promise<unknown>
   serveDetailFile?(request: Request): Promise<Response>
+}
+
+/** A pnpm root symlink can move while Node retains its first bare-specifier resolution. */
+export function enterprisePackageParent(specifier: string, directory: string, installationNames: ReadonlySet<string>): string | undefined {
+  const name = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0]!
+  if (!PACKAGE.test(name) || installationNames.has(name)) return undefined
+  const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')) as { dependencies?: Record<string, unknown> }
+  if (!manifest.dependencies || !Object.hasOwn(manifest.dependencies, name)) return undefined
+  // Do not fall back to Node's cached old target if an expected new package is missing or corrupt.
+  const anchor = realpathSync.native(join(directory, 'node_modules', name, 'package.json'))
+  const installed: unknown = JSON.parse(readFileSync(anchor, 'utf8'))
+  if (!installed || typeof installed !== 'object' || (installed as { name?: unknown }).name !== name) throw new Error(`企业插件 ${name} 的安装清单无效`)
+  return pathToFileURL(anchor).href
+}
+
+/** Keep the official HMR transaction; change only the root tree's user-package resolution parent. */
+function installEnterpriseProfileImports(ctx: Context, market: EnterpriseMarket): void {
+  if (!market.enabled) return
+  const packages = ctx.get('pluginPackages') as unknown as { resolution?: { entries: { name: string; scope: string }[] } } | undefined
+  const entries = packages?.resolution?.entries
+  if (!entries) throw new Error('企业插件市场需要当前 Host 的官方包解析服务')
+  const installationNames = new Set(entries.filter(entry => entry.scope === 'installation').map(entry => entry.name))
+  // app-boot keeps this Include instance on patch updates. Its original method retains the actual
+  // development or packaged bareModuleBaseUrl for every installation-owned or non-package import.
+  const tree = ctx.loader.resolve('include').subtree
+  const internal = ctx.loader.internal
+  if (!tree || !internal) throw new Error('企业插件市场需要当前 Host 的根插件加载器')
+  const original = tree.import
+  const wrapped: typeof original = (name, getOuterStack) => {
+    const parent = enterprisePackageParent(name, market.profileDirectory, installationNames)
+    return parent === undefined ? original.call(tree, name, getOuterStack) : internal.import(name, parent, {})
+  }
+  tree.import = wrapped
+  ctx.effect(() => () => { if (tree.import === wrapped) tree.import = original }, 'Enterprise Market: current pnpm package import parents')
 }
 
 /** Bounded JSON request; redirects never turn a local policy into a different server. */
@@ -382,6 +417,7 @@ export async function createEnterprisePortalProxy(market: EnterpriseMarket): Pro
 export function installEnterpriseMarketRoutes(ctx: Context, market: EnterpriseMarket): void {
   const manager = ctx.get('pluginManager') as unknown as EnterprisePluginManager | undefined
   if (!manager) throw new Error('Enterprise Market requires the official pluginManager service')
+  installEnterpriseProfileImports(ctx, market)
   market.guard(manager)
   ctx.effect(() => () => market.dispose(), 'Enterprise Market: isolated loopback portal proxy')
   for (const suffix of ['state', 'config', 'connect', 'operation']) {

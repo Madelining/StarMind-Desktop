@@ -18,6 +18,7 @@ const fixtureDir = join(temporary, 'fixtures')
 mkdirSync(home)
 let market, host
 const requests = []
+const hostLogs = []
 const second = '@starmind/enterprise-second-smoke'
 const networkGuard = join(temporary, 'network-guard.cjs'), networkAudit = join(temporary, 'network-violations.log')
 const guardReceipts = join(temporary, 'network-guard-loaded.jsonl')
@@ -63,7 +64,8 @@ async function boot() {
       NODE_OPTIONS: `--require "${networkGuard.replaceAll('\\', '/')}"`, STARMIND_NETWORK_AUDIT_LOG: networkAudit,
       STARMIND_NETWORK_GUARD_RECEIPTS: guardReceipts,
       HTTP_PROXY: '', HTTPS_PROXY: '', ALL_PROXY: '', http_proxy: '', https_proxy: '', all_proxy: '' },
-    undefined, undefined, undefined, join(root, 'scripts', 'fixtures', 'isolated-user-host.mjs'), () => {})
+    undefined, undefined, undefined, join(root, 'scripts', 'fixtures', 'isolated-user-host.mjs'), () => {},
+    undefined, chunk => { hostLogs.push(chunk) })
   let timer
   const ready = await Promise.race([host.start(), new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error('Enterprise Host startup exceeded 90 seconds')), 90_000)
@@ -106,6 +108,12 @@ const activePlugin = async (session, name) => {
   assert.equal(row?.fiberPhase, 'active', JSON.stringify(row))
 }
 const installedVersion = name => JSON.parse(readFileSync(join(profileDirectory, 'node_modules', name, 'package.json'), 'utf8')).version
+const executedVersion = async (since, version) => {
+  const message = `StarMind fixture ${version}: helper ${version}`, deadline = Date.now() + 5_000
+  while (!hostLogs.slice(since).join('').includes(message) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20))
+  assert.ok(hostLogs.slice(since).join('').includes(message),
+    `The actual Host must execute plugin ${version} with helper ${version}; logs: ${hostLogs.slice(since).join('')}`)
+}
 try {
   market = await startMarketServer({ dataDir, port: 0 })
   market.server.on('request', request => { requests.push(request.url) })
@@ -146,31 +154,39 @@ try {
   assert.equal(blockedProxyWrite.status, 403); await blockedProxyWrite.body?.cancel()
   const noNonce = await fetch(new URL('/api/pluginManager/listBundles', portalUrl))
   assert.equal(noNonce.status, 404); await noNonce.body?.cancel()
+  let logStart = hostLogs.length
   success(await operation({ action: 'install', packageName: PLUGIN, version: '1.0.0' }))
   assert.equal(installedVersion(PLUGIN), '1.0.0')
   await activePlugin(session, PLUGIN)
+  await executedVersion(logStart, '1.0.0')
   // pnpm's dependency links belong to the real package directory, not its top-level projection.
   const pluginRequire = createRequire(realpathSync(join(profileDirectory, 'node_modules', PLUGIN, 'package.json')))
   assert.equal(JSON.parse(readFileSync(join(dirname(pluginRequire.resolve(HELPER)), 'package.json'), 'utf8')).version, '1.0.0')
   success(await operation({ action: 'install', packageName: second, version: '1.0.0' }))
   assert.equal(installedVersion(second), '1.0.0')
   await activePlugin(session, second)
+  logStart = hostLogs.length
   success(await operation({ action: 'update', packageName: PLUGIN, version: '1.1.0' }))
   assert.equal(installedVersion(PLUGIN), '1.1.0')
   await activePlugin(session, PLUGIN)
+  await executedVersion(logStart, '1.1.0')
   const listed = await operation({ action: 'list' })
   assert.ok(listed.bundles.some(row => row.name === PLUGIN && row.enabled && !row.error), JSON.stringify(listed))
   const refused = await rpc('installBundle', { spec: 'https://registry.npmjs.org/example.tgz' })
   assert.equal(refused.result?.ok, false, 'Official remote entry must also reject external specs')
   const publicMarket = await rpc('setBundleEnabled', { name: 'dshmarket', enabled: true })
   assert.equal(publicMarket.result?.ok, false, 'Official remote must not re-enable public markets')
+  logStart = hostLogs.length
   const broken = await operation({ action: 'update', packageName: PLUGIN, version: '1.2.0' })
   assert.equal(broken.result?.application, 'failed', JSON.stringify(broken))
-  if (broken.restore) { success(broken.restore); assert.equal(installedVersion(PLUGIN), '1.1.0'); await activePlugin(session, PLUGIN) }
+  assert.ok(hostLogs.slice(logStart).join('').includes('INTENTIONAL_FIXTURE_ACTIVATION_FAILURE'), 'The broken 1.2 code must actually execute')
+  if (broken.restore) { success(broken.restore); assert.equal(installedVersion(PLUGIN), '1.1.0'); await activePlugin(session, PLUGIN); await executedVersion(logStart, '1.1.0') }
   else throw new Error('Host has no verified HMR restoration; refusing to report activation recovery success')
   await host.stop(true); host = undefined
+  logStart = hostLogs.length
   session = await boot()
   await activePlugin(session, PLUGIN)
+  await executedVersion(logStart, '1.1.0')
   await activePlugin(session, second)
   success(await session.operation({ action: 'uninstall', packageName: second }))
   success(await session.operation({ action: 'uninstall', packageName: PLUGIN }))

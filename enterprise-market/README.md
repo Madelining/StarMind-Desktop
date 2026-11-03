@@ -71,7 +71,7 @@ Windows 交付包可将命令中的 `node` 换为 `runtime\node.exe`。npm 从�
 
 ## 存储、恢复与接口
 
-详见 [OPERATIONS.md](OPERATIONS.md)。服务为单机单写者设计，数据目录应位于本地磁盘；不支持多个进程共享 NFS/SMB 目录。没有后台公网同步、自动 npm fallback 或数据库安装要求。
+详见 [OPERATIONS.md](OPERATIONS.md)，实现与维护说明见 [ARCHITECTURE.md](ARCHITECTURE.md)。服务为单机单写者设计，数据目录应位于本地磁盘；不支持多个进程共享 NFS/SMB 目录。没有后台公网同步、自动 npm fallback 或数据库安装要求。
 
 ## 验证
 
