@@ -4,6 +4,8 @@
 
 本实现替代前期 `adt-cpd-workflow/enterprise-market-plan/` 中的实施设想；以本目录代码、测试和实际交付说明为准。客户端接入位于 **Beta / Next**，旧 Stable 客户端需要使用本次 Beta 安装包。
 
+已构建交付：[Windows 客户端与内网服务器下载](https://github.com/Madelining/StarMind-Desktop/releases/tag/enterprise-market-7)，以及 [交付与三步部署说明](DELIVERY.md)。
+
 ## 日常使用
 
 - 浏览、搜索、分类、排序、收藏、查看使用说明和历史版本。
@@ -14,7 +16,7 @@
 
 ## 先在一台内网电脑部署
 
-Windows 用户下载本分支 Actions 的 **StarMind-Market-Server-Windows-x64** 交付包，完整解压。它包含 Node 运行时、npm、网页和全部市场依赖源码，不需要联网安装。源代码 ZIP 不包含 Node 二进制。
+Windows 用户从上述预发布下载 **StarMind-Market-Server-Windows-x64.zip** 交付包，完整解压。它包含 Node 运行时、npm、网页和全部市场依赖源码，不需要联网安装。源代码 ZIP 不包含 Node 二进制。
 
 1. 将 `market.config.example.json` 复制为 `market.config.json`。
 2. 把 `host` 改为 `0.0.0.0`；把 `publicOrigin` 改为同事实际访问的地址，例如 `http://10.10.20.30:8787`。地址不带尾斜杠或路径。域名、IP、协议、端口需要与访问地址完全一致。
