@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, readdir, writeFile, utimes } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startMarketServer } from '../src/server.mjs';
@@ -40,7 +41,8 @@ test('real HTTP upload, ranged and alias dependencies, search, metadata and exac
   const b = makeTarball({ name: '@company/helper', version: '2.0.0' });
   const published = await ctx.publish(plugin('1.0.0', { dependencies: { helperAlias: 'npm:@company/helper@^1.0.0' } }), [a, b], { title: '测试工具', category: '开发' });
   // npm dependency aliases themselves must be valid lowercase package names.
-  assert.equal(published.response.status, 422);
+  assert.equal(published.response.status, 400);
+  assert.equal(published.content.error.code, 'DEPENDENCY_UNSUPPORTED');
   const success = await ctx.publish(plugin('1.0.0', { dependencies: { 'helper-alias': 'npm:@company/helper@^1.0.0' } }), [a, b], { title: '测试工具', category: '开发' });
   assert.equal(success.response.status, 201, JSON.stringify(success.content));
   const release = success.content.release;
@@ -105,6 +107,21 @@ test('lifecycle/native-build blockers explicit; prepare alone is allowed; option
   assert.equal(good.response.status, 201);
 });
 
+test('legacy plugins without engines.dsh warn and remain usable; invalid declared ranges reject', async t => {
+  const ctx = await setup(t);
+  const legacy = await ctx.publish(plugin('1.0.0', { engines: undefined }));
+  assert.equal(legacy.response.status, 201, JSON.stringify(legacy.content));
+  assert(legacy.content.release.warnings.some(item => item.code === 'COMPATIBILITY_UNDECLARED'));
+  const index = (await ctx.api('/dsh-index.json')).content;
+  assert.deepEqual(index.plugins[0].versions[0].engines, {});
+  for (const dsh of ['latest', '', 123]) {
+    const invalid = await ctx.publish(plugin('1.1.0', { engines: { dsh } }));
+    assert.equal(invalid.response.status, 400);
+    assert.equal(invalid.content.error.code, 'BUNDLE_INVALID');
+  }
+  assert.equal((await ctx.store.readState()).releases.length, 1);
+});
+
 test('immutable global dependency identity and withdrawn releases retain original bytes', async t => {
   const ctx = await setup(t);
   const helper = makeTarball({ name: 'helper', version: '1.0.0' }, { 'package/data.txt': 'original' });
@@ -154,4 +171,43 @@ test('invalid uploads, traversal and links reject; size cap rejects before state
   const response = await ctx.upload(Buffer.alloc(1024));
   assert(response.response.status === 413 || response.response.status === 400);
   assert.equal((await ctx.api('/api/catalog')).content.total, 0);
+});
+
+test('archives reject Windows device names, invalid components and case-insensitive extraction collisions', () => {
+  const manifest = { name: 'safe', version: '1.0.0' };
+  for (const name of ['CON', 'aux.txt', 'COM1.js', 'lpt9', 'com¹.txt', 'NUL.data', 'CONIN$', 'trailing.', 'trailing ', 'a<b', 'a|b', 'a?b', 'a*b', 'control\u0001']) {
+    assert.throws(() => inspectTarball(makeTarball(manifest, { ['package/nested/' + name]: 'bad' })), error => error.code === 'ARCHIVE_PATH_INVALID', name);
+  }
+  for (const files of [
+    { 'package/INDEX.js': 'collides with index.js' },
+    { 'package/nested': 'file', 'package/NESTED/data.txt': 'child' },
+    { 'package/nested/data.txt': 'child', 'package/NESTED': 'file' },
+    { 'package/PACKAGE.JSON': 'collides with manifest' },
+  ]) assert.throws(() => inspectTarball(makeTarball(manifest, files)), error => error.code === 'ARCHIVE_PATH_INVALID');
+  assert(inspectTarball(makeTarball(manifest, { 'package/nested/.config': 'allowed' })).paths.includes('package/nested/.config'));
+});
+
+test('expired staging and crash leftovers are physically cleaned; fresh uploads and published artifacts remain', async t => {
+  const ctx = await setup(t);
+  const first = await ctx.upload(makeTarball(plugin('1.0.0')));
+  const firstId = first.content.upload.id;
+  const firstMetaPath = join(ctx.dir, 'uploads', firstId + '.json');
+  const meta = JSON.parse(await readFile(firstMetaPath, 'utf8'));
+  const oldTime = new Date(Date.now() - 25 * 60 * 60 * 1000);
+  meta.createdAt = oldTime.toISOString();
+  await writeFile(firstMetaPath, JSON.stringify(meta));
+  const fresh = await ctx.upload(makeTarball(plugin('1.0.0')));
+  assert.equal(fresh.response.status, 201);
+  assert(!(await readdir(join(ctx.dir, 'uploads'))).some(name => name.startsWith(firstId)));
+  const orphan = join(ctx.dir, 'uploads', randomUUID() + '.tgz');
+  await writeFile(orphan, 'interrupted upload');
+  await utimes(orphan, oldTime, oldTime);
+  await ctx.restart();
+  assert.deepEqual((await readdir(join(ctx.dir, 'uploads'))).sort(), [fresh.content.upload.id + '.json', fresh.content.upload.id + '.tgz'].sort());
+  const published = await ctx.post('/api/releases', { plugin: { name: '@company/example', version: '1.0.0' }, uploadIds: [fresh.content.upload.id] });
+  assert.equal(published.response.status, 201);
+  const bytesBefore = await readFile(ctx.store.artifactPath(fresh.content.upload.sha256));
+  await ctx.service.market.cleanupUploads(Date.now() + 48 * 60 * 60 * 1000);
+  assert.deepEqual(await readFile(ctx.store.artifactPath(fresh.content.upload.sha256)), bytesBefore);
+  assert.equal((await ctx.api('/api/catalog')).content.total, 1);
 });

@@ -51,7 +51,7 @@ node src/cli.mjs serve --config market.config.json
 
 插件没有声明 `engines.dsh` 时会保留“兼容范围未声明”的提示，不替作者虚构兼容性。预编译 `.node` 模块可以上传，但仍需符合目标系统和 Node ABI。
 
-需要 `preinstall/install/postinstall`、隐式 node-gyp 编译，或 Git/URL/file/workspace 依赖的包会被拒绝。请先由插件维护者制作不需要安装脚本的离线预构建版本。插件运行时调用的外部 API、模型、浏览器引擎或 Python 服务，需要另行提供内网替代或离线资源；npm 包完整并不意味着这些服务也已准备好。
+需要 `preinstall/install/postinstall`、隐式 node-gyp 编译、内嵌 `node_modules` / 非空 `bundleDependencies`，或 Git/URL/file/workspace 依赖的包会被拒绝。请先由插件维护者制作不需要安装脚本、依赖独立发布的离线预构建版本。插件运行时调用的外部 API、模型、浏览器引擎或 Python 服务，需要另行提供内网替代或离线资源；npm 包完整并不意味着这些服务也已准备好。
 
 ## 在可下载依赖的电脑上准备完整离线包
 
@@ -63,7 +63,9 @@ node tools/prepare-offline.mjs --plugin dsh-plugin-save-token@2.4.1 --registry h
 node tools/prepare-offline.mjs --tarball downloaded-plugin.tgz --registry https://你的只读npm镜像/ --output plugin.dshbundle.json
 ```
 
-Windows 交付包可将命令中的 `node` 换为 `runtime\node.exe`。npm 从指定镜像生成真实锁文件，工具按锁下载并校验原始 tgz，生成市场可再次校验的离线 JSON 包。若镜像把制品重定向到另一可信域名，可显式增加 `--allow-origin https://制品域名`；不会自动跟随未知外部地址。
+Windows 交付包可将命令中的 `node` 换为 `runtime\node.exe`。npm 从指定镜像生成真实锁文件，工具按锁下载并校验原始 tgz，并在写出 JSON 前运行与市场相同的发布检查。如果某个平台的 optional 依赖没有被 npm 收集齐，准备过程会报出缺失项，不会生成看似完整的交付包。
+
+准备工具使用空的 npm 用户和全局配置，并清除继承的 `npm_config_*`，避免个人的 scoped registry 覆盖指定镜像。镜像需允许匿名读取；需企业 CA 时可设置 `NODE_EXTRA_CA_CERTS` 指向 CA 文件。若镜像把制品重定向到另一可信域名，可显式增加 `--allow-origin https://制品域名`；制品下载不会自动跟随未知外部地址。npm 求解本身仍需能读取插件声明所需的元数据；不支持的 Git/URL 等依赖应由作者先改为镜像中的 npm 包。
 
 将生成的 `.dshbundle.json` 复制进公司，在市场“发布插件 → 导入离线包”上传。npm 镜像缺包时，需要在可以下载这些包的机器准备完整包；隔离市场不会替用户访问公网补齐。
 

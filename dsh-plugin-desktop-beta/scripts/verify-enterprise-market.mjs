@@ -92,9 +92,15 @@ async function boot() {
 }
 const success = result => {
   const change = result.result ?? result
-  assert.notEqual(change.application, 'failed', JSON.stringify(result))
-  assert.notEqual(change.application, 'cancelled', JSON.stringify(result))
+  assert.equal(change.application, 'applied', JSON.stringify(result))
   assert.equal(change.error, undefined, JSON.stringify(result))
+}
+const activePlugin = async (session, name) => {
+  const reply = await session.rpc('listPlugins', {})
+  assert.equal(reply.result?.ok, true, JSON.stringify(reply))
+  const row = reply.result.value.find(plugin => plugin.moduleName === name)
+  assert.equal(row?.enabled, true, JSON.stringify(row))
+  assert.equal(row?.fiberPhase, 'active', JSON.stringify(row))
 }
 const installedVersion = name => JSON.parse(readFileSync(join(profileDirectory, 'node_modules', name, 'package.json'), 'utf8')).version
 try {
@@ -134,12 +140,15 @@ try {
   assert.equal(noNonce.status, 404); await noNonce.body?.cancel()
   success(await operation({ action: 'install', packageName: PLUGIN, version: '1.0.0' }))
   assert.equal(installedVersion(PLUGIN), '1.0.0')
+  await activePlugin(session, PLUGIN)
   const pluginRequire = createRequire(join(profileDirectory, 'node_modules', PLUGIN, 'package.json'))
   assert.equal(JSON.parse(readFileSync(join(dirname(pluginRequire.resolve(HELPER)), 'package.json'), 'utf8')).version, '1.0.0')
   success(await operation({ action: 'install', packageName: second, version: '1.0.0' }))
   assert.equal(installedVersion(second), '1.0.0')
+  await activePlugin(session, second)
   success(await operation({ action: 'update', packageName: PLUGIN, version: '1.1.0' }))
   assert.equal(installedVersion(PLUGIN), '1.1.0')
+  await activePlugin(session, PLUGIN)
   const listed = await operation({ action: 'list' })
   assert.ok(listed.bundles.some(row => row.name === PLUGIN && row.enabled && !row.error), JSON.stringify(listed))
   const refused = await rpc('installBundle', { spec: 'https://registry.npmjs.org/example.tgz' })
@@ -148,10 +157,12 @@ try {
   assert.equal(publicMarket.result?.ok, false, 'Official remote must not re-enable public markets')
   const broken = await operation({ action: 'update', packageName: PLUGIN, version: '1.2.0' })
   assert.equal(broken.result?.application, 'failed', JSON.stringify(broken))
-  if (broken.restore) { success(broken.restore); assert.equal(installedVersion(PLUGIN), '1.1.0') }
+  if (broken.restore) { success(broken.restore); assert.equal(installedVersion(PLUGIN), '1.1.0'); await activePlugin(session, PLUGIN) }
   else throw new Error('Host has no verified HMR restoration; refusing to report activation recovery success')
   await host.stop(true); host = undefined
   session = await boot()
+  await activePlugin(session, PLUGIN)
+  await activePlugin(session, second)
   success(await session.operation({ action: 'uninstall', packageName: second }))
   success(await session.operation({ action: 'uninstall', packageName: PLUGIN }))
   const final = await session.operation({ action: 'list' })

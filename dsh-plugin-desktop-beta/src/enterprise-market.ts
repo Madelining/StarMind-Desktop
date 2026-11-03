@@ -141,22 +141,30 @@ export class EnterpriseMarket {
     if (this.enabled) profile.layers = profile.layers.filter(layer => !ENTERPRISE_PUBLIC_BUNDLES.has(layer.packageName))
     return profile
   }
-  pnpmEnvironment(): NodeJS.ProcessEnv {
+  pnpmEnvironment(): Readonly<Record<string, string>> {
     if (!this.enabled) return {}
     const npmrc = join(this.home, 'enterprise-market.npmrc')
     const globalNpmrc = join(this.home, 'enterprise-market.global.npmrc')
     atomicText(npmrc, `registry=${this.config.url ? this.registry : 'http://127.0.0.1:1/'}\nstrict-ssl=true\nupdate-notifier=false\n`)
     atomicText(globalNpmrc, '')
-    const env: NodeJS.ProcessEnv = {
+    const env: Record<string, string> = {
       npm_config_registry: this.config.url ? this.registry : 'http://127.0.0.1:1/',
       pnpm_config_registry: this.config.url ? this.registry : 'http://127.0.0.1:1/',
       NPM_CONFIG_USERCONFIG: npmrc, NPM_CONFIG_GLOBALCONFIG: globalNpmrc,
       npm_config_audit: 'false', npm_config_fund: 'false',
       npm_config_ignore_scripts: 'true', pnpm_config_ignore_scripts: 'true',
+      npm_config_strict_ssl: 'true', pnpm_config_strict_ssl: 'true',
       npm_config_update_notifier: 'false', pnpm_config_update_notifier: 'false',
       ...(this.config.caFile ? { NODE_EXTRA_CA_CERTS: this.config.caFile, npm_config_cafile: this.config.caFile } : {}),
     }
-    for (const key of Object.keys(process.env)) if (/^(?:npm|pnpm)_config_.*registry$/iu.test(key) && !(key in env)) env[key] = undefined
+    // The upstream invocation merges string overrides into the inherited environment.
+    // Override scoped and differently-cased registry variables as well; undefined is not a deletion there.
+    const forced = new Map(Object.entries(env).map(([key, value]) => [key.toLowerCase(), value]))
+    for (const key of Object.keys(process.env)) {
+      const value = forced.get(key.toLowerCase())
+      if (value !== undefined) env[key] = value
+      else if (/^(?:npm|pnpm)_config_.*registry$/iu.test(key)) env[key] = env.npm_config_registry!
+    }
     return env
   }
   private assertReady(): void {
@@ -287,7 +295,7 @@ export async function proxyEnterprisePortal(req: IncomingMessage, res: ServerRes
   if (!market.enabled || market.configError || !market.config.url) { json(res, 503, { error: '企业市场未配置或需重启' }); return }
   const incoming = new URL(req.url ?? '/', 'http://127.0.0.1')
   const path = incoming.pathname.slice(prefix.length) || '/'
-  if (!['GET', 'HEAD', 'POST'].includes(req.method ?? '') || !(path === '/' || /^\/(?:app\.js|styles\.css|favicon\.ico|api\/|artifacts\/)/u.test(path))) {
+  if (!['GET', 'HEAD', 'POST'].includes(req.method ?? '') || !(path === '/' || /^\/(?:app\.js|core\.js|ui\.js|bridge\.js|publish\.js|installed\.js|styles\.css|favicon\.ico)$/u.test(path) || /^\/(?:api|artifacts)\//u.test(path))) {
     json(res, 404, { error: '不支持的市场代理路径' }); return
   }
   if (req.method === 'POST' && req.headers['x-starmind-market-request'] !== '1') { json(res, 403, { error: '无效市场写入请求' }); return }
@@ -299,12 +307,13 @@ export async function proxyEnterprisePortal(req: IncomingMessage, res: ServerRes
     const value = req.headers[key]
     if (typeof value === 'string') headers[key] = value
   }
-  const limit = 256 * 1024 * 1024
+  // Import/export uses base64 JSON around at most 256 MiB of original archives.
+  const limit = 384 * 1024 * 1024
   const bound = () => {
     let size = 0
     return new Transform({ transform(chunk: Buffer, _encoding, done) {
       size += chunk.length
-      done(size > limit ? new Error('市场传输超过 256 MiB 限制') : undefined, chunk)
+      done(size > limit ? new Error('市场传输超过 384 MiB 限制') : undefined, chunk)
     } })
   }
   await new Promise<void>((resolve, reject) => {

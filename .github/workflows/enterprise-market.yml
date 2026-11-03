@@ -128,7 +128,20 @@ jobs:
           }
           if (!(Test-Path -LiteralPath (Join-Path $runtime 'node.exe'))) { throw 'Missing Node executable' }
           if (!(Test-Path -LiteralPath (Join-Path $runtime 'node_modules/npm/bin/npm-cli.js'))) { throw 'Missing bundled npm for offline preparation' }
-          $receipt = [ordered]@{sourceCommit=$env:GITHUB_SHA; nodeVersion=(node --version); platform='win32'; arch='x64'; installRequired=$false; runtimeDependenciesVendored=$true}
+          if (!(Test-Path -LiteralPath (Join-Path $runtime 'LICENSE'))) { throw 'Missing Node license' }
+          if (!(Test-Path -LiteralPath (Join-Path $runtime 'node_modules/npm/LICENSE'))) { throw 'Missing npm license' }
+          $npmVersion = & (Join-Path $runtime 'node.exe') (Join-Path $runtime 'node_modules/npm/bin/npm-cli.js') --version
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled npm cannot run' }
+          # Verify the copied delivery in isolation, so tests cannot accidentally depend on
+          # another directory in the repository or a preinstalled server dependency.
+          Push-Location $out
+          try {
+            & '.\runtime\node.exe' --test 'test/*.test.mjs' 'tests/*.test.mjs'
+            if ($LASTEXITCODE -ne 0) { throw 'Standalone delivery validation failed' }
+            & '.\runtime\node.exe' 'tools/prepare-offline.mjs' --help
+            if ($LASTEXITCODE -ne 0) { throw 'Bundled preparation tool cannot run' }
+          } finally { Pop-Location }
+          $receipt = [ordered]@{sourceCommit=$env:GITHUB_SHA; nodeVersion=(node --version); npmVersion="$npmVersion"; platform='win32'; arch='x64'; installRequired=$false; runtimeDependenciesVendored=$true; standaloneTestsPassed=$true}
           $receipt | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $out 'build-info.json') -Encoding utf8NoBOM
           Get-ChildItem -LiteralPath $out -Recurse -File | ForEach-Object {
             $relative = [IO.Path]::GetRelativePath($out, $_.FullName).Replace('\', '/')

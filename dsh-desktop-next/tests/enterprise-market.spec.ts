@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,7 +13,7 @@ function setup() {
   writeFileSync(join(home, 'enterprise-market.json'), JSON.stringify({ schemaVersion: 1, enabled: true, url: 'http://127.0.0.1:18765', allowHttp: true }))
   return { home, profile }
 }
-afterEach(() => { for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true }) })
+afterEach(() => { vi.unstubAllEnvs(); for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true }) })
 it('requires an explicit HTTP decision and rejects URL credentials or remote policy fields', () => {
   expect(() => parseEnterpriseMarketConfig({ schemaVersion: 1, enabled: true, url: 'http://company.internal', allowHttp: false })).toThrow()
   expect(() => parseEnterpriseMarketConfig({ schemaVersion: 1, enabled: true, url: 'https://u:p@company.internal', allowHttp: false })).toThrow()
@@ -30,6 +30,21 @@ it('does not rewrite an old external lock; it blocks new enterprise installs', (
   const { home, profile } = setup()
   writeFileSync(join(profile, 'pnpm-lock.yaml'), 'tarball: https://registry.npmjs.org/external.tgz\n')
   expect(enterpriseProfileIssues(profile, new EnterpriseMarket(home, profile).config)).toContain('pnpm-lock.yaml 包含外部地址')
+})
+it('overrides inherited scoped registries and requires TLS verification in package-manager children', () => {
+  const { home, profile } = setup()
+  vi.stubEnv('NPM_CONFIG_REGISTRY', 'https://public.invalid/')
+  vi.stubEnv('npm_config_@example:registry', 'https://scope.invalid/')
+  vi.stubEnv('NPM_CONFIG_STRICT_SSL', 'false')
+  vi.stubEnv('PNPM_CONFIG_IGNORE_SCRIPTS', 'false')
+  const env = new EnterpriseMarket(home, profile).pnpmEnvironment()
+  expect(env.NPM_CONFIG_REGISTRY).toBe('http://127.0.0.1:18765/npm/')
+  expect(env['npm_config_@example:registry']).toBe(env.npm_config_registry)
+  expect(Object.values(env).every(value => typeof value === 'string')).toBe(true)
+  expect(env.npm_config_strict_ssl).toBe('true')
+  expect(env.pnpm_config_strict_ssl).toBe('true')
+  expect(env.NPM_CONFIG_STRICT_SSL).toBe('true')
+  expect(env.PNPM_CONFIG_IGNORE_SCRIPTS).toBe('true')
 })
 it('a public remote install cannot bypass the exact-version guard', async () => {
   const { home, profile } = setup(); const market = new EnterpriseMarket(home, profile)
@@ -58,6 +73,10 @@ it('portal proxy isolates origins, strips Host credentials and refuses redirects
     const response = await fetch(new URL('api/config', proxy.url), { headers: { cookie: 'HostSecret=private' } })
     expect(response.status).toBe(200); await response.body?.cancel()
     expect(forwardedCookie).toBeUndefined(); expect(forwardedOrigin).toBe(origin)
+    for (const asset of ['app.js', 'core.js', 'ui.js', 'bridge.js', 'publish.js', 'installed.js', 'styles.css']) {
+      const assetResponse = await fetch(new URL(asset, proxy.url))
+      expect(assetResponse.status, asset).toBe(200); await assetResponse.body?.cancel()
+    }
     const bad = await fetch(new URL('api/login', proxy.url), { method: 'POST', headers: { origin: 'https://outside.invalid', 'x-starmind-market-request': '1' }, body: '{}' })
     expect(bad.status).toBe(403); await bad.body?.cancel()
     const redirect = await fetch(new URL('api/redirect', proxy.url))

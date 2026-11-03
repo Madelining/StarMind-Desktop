@@ -10,6 +10,7 @@ import { validateIdentity, checkPublication, validName, semver } from './depende
 import { assert, MarketError } from './errors.mjs';
 
 export const BUNDLE_SCHEMA = 'starmind.enterprise-market.bundle';
+export const UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
 const json = value => JSON.stringify(value, null, 2) + '\n';
 const safeId = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 async function atomicJson(file, value) {
@@ -72,19 +73,60 @@ export async function openMarket(dataDir, options = {}) {
     try { meta = JSON.parse(await readFile(join(root, 'uploads', id + '.json'), 'utf8')); }
     catch (error) { if (error.code === 'ENOENT') throw new MarketError('UPLOAD_NOT_FOUND', '上传已过期或不存在。', 404); throw error; }
     assert(meta.ownerId === user.id, 'FORBIDDEN', '不能使用其他用户的未发布上传。', 403);
-    assert(Date.now() - Date.parse(meta.createdAt) < 24 * 60 * 60 * 1000, 'UPLOAD_EXPIRED', '上传记录已过期，请重新上传。', 410);
+    assert(Date.now() - Date.parse(meta.createdAt) < UPLOAD_TTL_MS, 'UPLOAD_EXPIRED', '上传记录已过期，请重新上传。', 410);
     return meta;
+  }
+  const uploadsInUse = new Map();
+  function holdUploads(ids) { for (const id of ids) uploadsInUse.set(id, (uploadsInUse.get(id) ?? 0) + 1); }
+  function releaseUploads(ids) { for (const id of ids) { const count = uploadsInUse.get(id) - 1; if (count > 0) uploadsInUse.set(id, count); else uploadsInUse.delete(id); } }
+  let cleanupPromise;
+  function cleanupUploads(now = Date.now()) {
+    if (cleanupPromise) return cleanupPromise;
+    cleanupPromise = (async () => {
+      const uploadsDir = join(root, 'uploads'), retained = new Set();
+      const entries = await readdir(uploadsDir, { withFileTypes: true });
+      let removedFiles = 0;
+      const remove = async file => { try { await unlink(file); removedFiles++; } catch (error) { if (error.code !== 'ENOENT') throw error; } };
+      for (const entry of entries) {
+        const match = entry.isFile() && entry.name.match(/^([0-9a-f-]{36})\.json$/);
+        if (!match) continue;
+        const id = match[1], file = join(uploadsDir, entry.name);
+        if (uploadsInUse.has(id)) { retained.add(id); continue; }
+        let createdAt;
+        try { createdAt = Date.parse(JSON.parse(await readFile(file, 'utf8')).createdAt); }
+        catch (error) { if (error.code === 'ENOENT') continue; if (!(error instanceof SyntaxError)) throw error; }
+        if (!Number.isFinite(createdAt)) createdAt = (await stat(file)).mtimeMs;
+        if (now - createdAt < UPLOAD_TTL_MS) { retained.add(id); continue; }
+        await remove(file);
+        await remove(join(uploadsDir, id + '.tgz'));
+      }
+      // A process crash can leave a tarball or atomic metadata temporary file without its record.
+      for (const entry of entries) {
+        const match = entry.isFile() && entry.name.match(/^([0-9a-f-]{36})(?:\.tgz|\.json\.[0-9a-f-]{36}\.tmp)$/);
+        if (!match || retained.has(match[1]) || uploadsInUse.has(match[1])) continue;
+        const file = join(uploadsDir, entry.name);
+        let info;
+        try { info = await stat(file); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+        if (now - info.mtimeMs >= UPLOAD_TTL_MS) await remove(file);
+      }
+      return { removedFiles };
+    })().finally(() => { cleanupPromise = undefined; });
+    return cleanupPromise;
   }
   async function stage(stream, filename, user) {
     assert(typeof filename === 'string' && filename.length <= 200 && filename.endsWith('.tgz') && basename(filename) === filename && !/[\\/\0\r\n]/.test(filename), 'UPLOAD_FILENAME_INVALID', '只支持文件名明确的原始 .tgz 包。');
+    await cleanupUploads();
     let currentBytes = 0;
     for (const entry of await readdir(join(root, 'uploads'))) {
       if (!entry.endsWith('.json')) continue;
-      const upload = JSON.parse(await readFile(join(root, 'uploads', entry), 'utf8'));
-      if (upload.ownerId === user.id && Date.now() - Date.parse(upload.createdAt) < 86400000) currentBytes += upload.size;
+      let upload;
+      try { upload = JSON.parse(await readFile(join(root, 'uploads', entry), 'utf8')); }
+      catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+      if (upload.ownerId === user.id && Date.now() - Date.parse(upload.createdAt) < UPLOAD_TTL_MS) currentBytes += upload.size;
     }
     assert(currentBytes < limits.maxUploadBytesPerUser, 'UPLOAD_QUOTA_EXCEEDED', '当前用户暂存空间已满。', 413);
     const id = randomUUID(), file = join(root, 'uploads', id + '.tgz');
+    holdUploads([id]);
     let size = 0;
     const measure = new Transform({ transform(chunk, encoding, callback) {
       size += chunk.length;
@@ -98,13 +140,14 @@ export async function openMarket(dataDir, options = {}) {
       await atomicJson(join(root, 'uploads', id + '.json'), meta);
       return { id, filename, size, sha256: info.sha256, name: info.manifest.name, version: info.manifest.version, bundle: typeof info.manifest.dsh?.bundle?.patch === 'string' };
     } catch (error) { await unlink(file).catch(() => {}); throw error; }
+    finally { releaseUploads([id]); }
   }
   const bounded = (value, fallback, max) => {
     if (value === undefined) return fallback;
     assert(typeof value === 'string' && value.length <= max && !value.includes('\0'), 'PUBLICATION_INVALID', '发布说明长度或格式非法。');
     return value;
   };
-  async function publish(input, user) {
+  async function publishStaged(input, user) {
     assert(input && typeof input === 'object' && input.plugin && validName(input.plugin.name) && typeof input.plugin.version === 'string', 'PUBLICATION_INVALID', '请选择主插件及其精确版本。');
     assert(Array.isArray(input.uploadIds) && input.uploadIds.length > 0 && input.uploadIds.length <= limits.maxPackages && new Set(input.uploadIds).size === input.uploadIds.length, 'PUBLICATION_INVALID', '上传包列表为空、重复或过大。');
     const uploads = await Promise.all(input.uploadIds.map(id => readUpload(id, user)));
@@ -159,6 +202,12 @@ export async function openMarket(dataDir, options = {}) {
     }
     return result;
   }
+  async function publish(input, user) {
+    const ids = Array.isArray(input?.uploadIds) ? input.uploadIds : [];
+    holdUploads(ids);
+    try { return await publishStaged(input, user); }
+    finally { releaseUploads(ids); }
+  }
   async function importBundle(bundle, user) {
     assert(bundle?.schema === BUNDLE_SCHEMA && bundle.schemaVersion === 1 && Array.isArray(bundle.packages) && bundle.packages.length > 0 && bundle.packages.length <= limits.maxPackages, 'BUNDLE_INVALID', '不支持的离线包格式或包数量。');
     assert(bundle.resources === undefined || (Array.isArray(bundle.resources) && bundle.resources.length === 0), 'RESOURCE_ADAPTER_UNSUPPORTED', '当前服务仅导入 npm 包闭包，不支持额外引擎/浏览器资源，请先提供专用适配器。', 422);
@@ -204,5 +253,5 @@ export async function openMarket(dataDir, options = {}) {
     }
     return { schema: BUNDLE_SCHEMA, schemaVersion: 1, plugin: { name: release.name, version: release.version }, title: release.title, description: release.description, category: release.category, readme: release.readme, packages };
   }
-  return { root, limits, readState, mutation, createUser, authenticate, stage, publish, importBundle, withdraw, exportBundle, artifactPath };
+  return { root, limits, readState, mutation, createUser, authenticate, stage, publish, importBundle, withdraw, exportBundle, artifactPath, cleanupUploads };
 }

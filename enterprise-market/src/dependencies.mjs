@@ -24,7 +24,7 @@ export function parseDependency(name, spec, owner, field) {
     assert(at > 0, 'DEPENDENCY_UNSUPPORTED', 'npm alias 必须包含原包名和版本范围。', 400, { owner, name, spec });
     target = alias.slice(0, at); range = alias.slice(at + 1);
   }
-  assert(validName(target) && range.length > 0 && semver.validRange(range) !== null, 'DEPENDENCY_UNSUPPORTED', '仅支持 npm SemVer 范围和 npm alias；不支持 tag、Git、URL、本地文件或 workspace 依赖。', 400, { owner, field, name, spec });
+  assert(validName(target) && range.length > 0 && semver.validRange(range) !== null, 'DEPENDENCY_UNSUPPORTED', '仅支持 npm SemVer 范围和 npm alias；不支持 tag、Git、URL、本地文件或 workspace 依赖。', 422, { owner, field, name, spec });
   return { name, target, range };
 }
 export function checkPublication(packages, rootIdentity) {
@@ -47,7 +47,9 @@ export function checkPublication(packages, rootIdentity) {
   const root = packages.find(pkg => pkg.manifest.name === rootIdentity.name && pkg.manifest.version === rootIdentity.version);
   assert(root, 'ROOT_PACKAGE_MISSING', '上传包集里没有选中的主插件。');
   assert(typeof root.manifest.dsh?.bundle?.patch === 'string', 'BUNDLE_INVALID', '主插件必须声明 dsh.bundle.patch 并包含对应文件。');
-  assert(typeof root.manifest.engines?.dsh === 'string' && semver.validRange(root.manifest.engines.dsh) !== null, 'BUNDLE_INVALID', '主插件必须声明有效的 engines.dsh 兼容范围。');
+  const dshRange = root.manifest.engines?.dsh;
+  if (dshRange === undefined) warnings.push({ code: 'COMPATIBILITY_UNDECLARED', package: root.manifest.name + '@' + root.manifest.version, message: '插件未声明 engines.dsh，安装前请确认与目标客户端兼容。' });
+  else assert(typeof dshRange === 'string' && dshRange.trim() && semver.validRange(dshRange) !== null, 'BUNDLE_INVALID', '主插件声明的 engines.dsh 必须是有效兼容范围。');
   for (const pkg of packages) {
     const owner = pkg.manifest.name + '@' + pkg.manifest.version;
     const optional = new Set(Object.keys(pkg.manifest.optionalDependencies ?? {}));

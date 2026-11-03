@@ -63,7 +63,15 @@ export async function startMarketServer(options = {}) {
   const serverLock = join(market.root, 'server.lock');
   try { await mkdir(serverLock); await writeFile(join(serverLock, 'owner.json'), JSON.stringify({ pid: process.pid, host: hostname(), startedAt: new Date().toISOString() })); }
   catch (error) { if (error.code === 'EEXIST') throw new MarketError('SERVER_ALREADY_RUNNING', '数据目录已有服务锁。确认旧进程退出后再恢复残留锁。', 409); throw error; }
+  try { await market.cleanupUploads(); }
+  catch (error) { await rm(serverLock, { recursive: true, force: true }); throw error; }
   const uploadsActive = new Map();
+  async function withUploadPermit(user, action) {
+    assert((uploadsActive.get(user.id) ?? 0) < 1 && [...uploadsActive.values()].reduce((a, b) => a + b, 0) < 4, 'UPLOAD_BUSY', '同时上传数量过多，请稍后重试。', 429);
+    uploadsActive.set(user.id, (uploadsActive.get(user.id) ?? 0) + 1);
+    try { return await action(); }
+    finally { const remaining = uploadsActive.get(user.id) - 1; if (remaining > 0) uploadsActive.set(user.id, remaining); else uploadsActive.delete(user.id); }
+  }
   const fileChecks = new Map();
   const registryUrl = () => origin + '/npm/';
   const snapshotRegistryUrl = release => origin + '/npm/releases/' + release.id + '/';
@@ -106,7 +114,10 @@ export async function startMarketServer(options = {}) {
       const current = versions.find(item => !semver.prerelease(item.version)) ?? versions[0];
       return { name, title: current.title, description: current.description, author: current.owner.name,
         'dist-tags': { latest: current.version },
-        versions: versions.map(release => ({ version: release.version, publishTimestamp: Math.floor(stamp(release) / 1000), source: { type: 'npm', registry: registryUrl(release) }, engines: { dsh: release.packages.find(pkg => pkg.name === name && pkg.version === release.version).manifest.engines.dsh } })) };
+        versions: versions.map(release => {
+          const dsh = release.packages.find(pkg => pkg.name === name && pkg.version === release.version).manifest.engines?.dsh;
+          return { version: release.version, publishTimestamp: Math.floor(stamp(release) / 1000), source: { type: 'npm', registry: registryUrl(release) }, engines: dsh === undefined ? {} : { dsh } };
+        }) };
     }) };
   }
   function manifest(pkg, release) {
@@ -180,13 +191,10 @@ export async function startMarketServer(options = {}) {
       if (isWrite && path === '/api/uploads') {
         const user = await auth();
         assert(request.headers['content-type']?.split(';')[0] === 'application/octet-stream', 'CONTENT_TYPE_INVALID', '原始包上传需要 application/octet-stream。', 415);
-        assert((uploadsActive.get(user.id) ?? 0) < 1 && [...uploadsActive.values()].reduce((a, b) => a + b, 0) < 4, 'UPLOAD_BUSY', '同时上传数量过多，请稍后重试。', 429);
-        uploadsActive.set(user.id, (uploadsActive.get(user.id) ?? 0) + 1);
-        try { return sendJson(response, { upload: await market.stage(request, url.searchParams.get('filename'), user) }, 201); }
-        finally { uploadsActive.set(user.id, uploadsActive.get(user.id) - 1); }
+        return await withUploadPermit(user, async () => sendJson(response, { upload: await market.stage(request, url.searchParams.get('filename'), user) }, 201));
       }
       if (isWrite && path === '/api/releases') { const user = await auth(); return sendJson(response, { release: publicRelease(await market.publish(await readJson(request, 2 * 1024 * 1024), user)) }, 201); }
-      if (isWrite && path === '/api/import') { const user = await auth(); return sendJson(response, { release: publicRelease(await market.importBundle(await readJson(request, options.maxImportBytes ?? 384 * 1024 * 1024), user)) }, 201); }
+      if (isWrite && path === '/api/import') { const user = await auth(); return await withUploadPermit(user, async () => sendJson(response, { release: publicRelease(await market.importBundle(await readJson(request, options.maxImportBytes ?? 384 * 1024 * 1024), user)) }, 201)); }
       if (isWrite && (match = path.match(/^\/api\/releases\/([a-f0-9]{64})\/withdraw$/))) { const user = await auth(); return sendJson(response, { release: publicRelease(await market.withdraw(match[1], user)) }); }
       if (!isWrite && path === '/dsh-index.json') return sendJson(response, index(state), 200, false, request);
       if (!isWrite && (match = path.match(/^\/snapshots\/([a-f0-9]{64})\/dsh-index.json$/))) {
@@ -243,7 +251,10 @@ export async function startMarketServer(options = {}) {
   try { await new Promise((resolveListen, reject) => { server.once('error', reject); server.listen(options.port ?? 8787, listenHost, resolveListen); }); }
   catch (error) { await rm(serverLock, { recursive: true, force: true }); throw error; }
   if (!origin) origin = 'http://' + (listenHost === '::1' ? '[::1]' : listenHost) + ':' + server.address().port;
+  const cleanupTimer = setInterval(() => { market.cleanupUploads().catch(error => options.onError?.(error, { operation: 'staging-cleanup' })); }, 60 * 60 * 1000);
+  cleanupTimer.unref();
   return { server, market, origin, close: async () => {
+    clearInterval(cleanupTimer);
     await new Promise((resolveClose, reject) => server.close(error => error ? reject(error) : resolveClose()));
     await rm(serverLock, { recursive: true, force: true });
   } };

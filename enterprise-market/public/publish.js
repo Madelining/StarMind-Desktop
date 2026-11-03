@@ -57,7 +57,7 @@ export function createPublisher({ api, toast, openDetail, onUserChange, onPublis
   }
   $('uploadPackagesButton').addEventListener('click', async () => {
     const files = [...$('packageFiles').files]; if (!files.length || busy) return;
-    if (files.some(file => !/\.(tgz|tar\.gz)$/i.test(file.name))) return error('请选择原始 .tgz 或 .tar.gz 包文件，离线 JSON 包请切换到导入方式。');
+    if (files.some(file => !file.name.endsWith('.tgz'))) return error('请选择文件名以 .tgz 结尾的原始包文件，离线 JSON 包请切换到导入方式。');
     busy = true; uploads = []; ready(); error(''); $('uploadProgressBox').hidden = false; $('uploadProgress').value = 0; $('uploadProgressPercent').textContent = '0%';
     const total = files.reduce((sum, file) => sum + file.size, 0) || 1; let before = 0;
     try {
@@ -78,7 +78,7 @@ export function createPublisher({ api, toast, openDetail, onUserChange, onPublis
         const file = $('bundleFile').files[0]; if (!file) throw new Error('请选择离线包。');
         // Import format is JSON/base64; enforce an explicit memory bound before parsing.
         if (file.size > 384 * 1024 * 1024) throw new Error('离线 JSON 包超过 384 MB，请改用管理员命令导入，避免浏览器内存不足。');
-        let bundle; try { bundle = JSON.parse(await file.text()); } catch { throw new Error('无法读取离线包 JSON，请下载完整的 .starmind-bundle.json 文件。'); }
+        let bundle; try { bundle = JSON.parse(await file.text()); } catch { throw new Error('无法读取离线包 JSON，请下载完整的 .bundle.json 文件。'); }
         if (bundle?.schema !== 'starmind.enterprise-market.bundle' || bundle.schemaVersion !== 1) throw new Error('离线包格式不受支持，需要 starmind.enterprise-market.bundle v1。');
         data = await api('api/import', { method: 'POST', body: JSON.stringify(bundle) });
       } else {

@@ -83,7 +83,7 @@ async function perform(action, name, version, statusNode) {
   finally { state.busy = false; }
 }
 async function openDetail(name, ownRelease = null) {
-  const dialog = $('detailDialog'); $('detailContent').replaceChildren(el('div', { className: 'loading-state', role: 'status' }, '正在读取插件详情…')); show(dialog);
+  const dialog = $('detailDialog'); $('detailContent').replaceChildren(el('h2', { id: 'detailTitle', className: 'sr-only' }, '插件详情'), el('div', { className: 'loading-state', role: 'status' }, '正在读取插件详情…')); show(dialog);
   try {
     const data = ownRelease ? { plugin: { ...ownRelease, latestVersion: ownRelease.version, versions: [ownRelease] } } : await api(`api/plugins/${encodeURIComponent(name)}`), plugin = data.plugin ?? data;
     const versions = Array.isArray(plugin.versions) ? plugin.versions : [], title = text(plugin.title, name);

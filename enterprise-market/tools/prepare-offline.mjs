@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { inspectTarball } from '../src/archive.mjs'
+import { checkPublication } from '../src/dependencies.mjs'
 import semver from '../vendor/semver/index.js'
 
 const MAX_ARCHIVE = 256 * 1024 * 1024
@@ -61,7 +62,7 @@ export function lockArtifacts(lock, localRoot) {
   for (const [path, record] of Object.entries(lock.packages)) {
     if (!path) continue
     if (record.link) throw new Error(`不支持 link/workspace 依赖：${path}`)
-    if (record.inBundle) continue // Already preserved inside its parent's original archive.
+    if (record.inBundle) throw new Error(`不支持内嵌 node_modules 的依赖：${path}。请使用依赖分开发布的离线预构建包。`)
     if (localRoot && path === `node_modules/${localRoot.name}`) continue
     if (!record.resolved || !/^https?:\/\//u.test(record.resolved)) throw new Error(`不支持非制品库依赖：${path}`)
     if (typeof record.integrity !== 'string') throw new Error(`包缺少校验值：${path}`)
@@ -90,6 +91,11 @@ async function runNpm(cli, args, cwd, env = process.env) {
   })
 }
 
+// A personal scoped registry must not silently override the registry selected for this bundle.
+export function npmEnvironment(source = process.env) {
+  return Object.fromEntries(Object.entries(source).filter(([key]) => !/^npm_config_/iu.test(key)))
+}
+
 export function parseArgs(args) {
   const result = { allowOrigins: [] }
   for (let i = 0; i < args.length; i++) {
@@ -114,7 +120,10 @@ export async function prepareOffline(options) {
   const npmCli = await npmCliPath(options.npmCli)
   let plugin, rootBytes
   if (options.tarball) {
-    rootBytes = await readFile(resolve(options.tarball))
+    const localTarball = resolve(options.tarball)
+    const localStat = await stat(localTarball)
+    if (!localStat.isFile() || localStat.size > MAX_ARCHIVE) throw new Error('本地主插件必须是文件，且不超过 256 MiB')
+    rootBytes = await readFile(localTarball)
     const inspected = inspectTarball(rootBytes)
     plugin = { name: inspected.manifest.name, version: inspected.manifest.version }
   } else {
@@ -129,14 +138,17 @@ export async function prepareOffline(options) {
     const dependencies = { [plugin.name]: rootBytes ? pathToFileURL(resolve(options.tarball)).href : plugin.version }
     await writeFile(join(temporary, 'package.json'), JSON.stringify({ name: 'starmind-offline-preparation', version: '1.0.0', private: true, dependencies }))
     await writeFile(join(temporary, '.npmrc'), `registry=${registry.href}\nignore-scripts=true\naudit=false\nfund=false\n`)
-    const args = ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund', '--include=optional', '--registry', registry.href, '--cache', join(temporary, 'npm-cache')]
+    const userConfig = join(temporary, 'user.npmrc'), globalConfig = join(temporary, 'global.npmrc')
+    await writeFile(userConfig, '')
+    await writeFile(globalConfig, '')
+    const args = ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund', '--include=optional', '--registry', registry.href, '--userconfig', userConfig, '--globalconfig', globalConfig, '--cache', join(temporary, 'npm-cache')]
     console.error(`正在通过 npm 求解 ${plugin.name}@${plugin.version}，不会执行插件脚本。`)
-    await runNpm(npmCli, args, temporary)
+    await runNpm(npmCli, args, temporary, npmEnvironment())
     const lockBytes = await readFile(join(temporary, 'package-lock.json'))
     const lock = JSON.parse(lockBytes)
     const artifacts = lockArtifacts(lock, rootBytes ? plugin : undefined)
     if (artifacts.length + (rootBytes ? 1 : 0) > 1000) throw new Error('依赖包数量超过市场默认上限 1000，请拆分插件或调整部署限额')
-    const packages = [], identities = new Map()
+    const packages = [], identities = new Map(), inspectedPackages = []
     let total = 0
     const include = bytes => {
       const info = inspectTarball(bytes)
@@ -147,6 +159,7 @@ export async function prepareOffline(options) {
       if (previous && previous !== info.sha256) throw new Error(`同一版本出现不同内容：${id}`)
       if (previous) return
       identities.set(id, info.sha256)
+      inspectedPackages.push(info)
       total += bytes.length
       if (total > MAX_TOTAL) throw new Error('离线包原始制品总大小超过市场默认上限 256 MiB，请拆分插件')
       packages.push({ filename: `${info.manifest.name.replace(/^@/u, '').replaceAll('/', '-')}-${info.manifest.version}.tgz`, contentsBase64: bytes.toString('base64') })
@@ -159,6 +172,10 @@ export async function prepareOffline(options) {
       include(bytes)
     }
     if (!identities.has(`${plugin.name}@${plugin.version}`)) throw new Error('npm 锁文件没有包含目标插件')
+    // npm may omit platform-incompatible optional packages. Never emit a bundle that the
+    // market's stricter cross-machine publication check would immediately reject.
+    const publication = checkPublication(inspectedPackages, plugin)
+    for (const warning of publication.warnings) console.error(`提示：${warning.message ?? warning.code}`)
     const bundle = {
       schema: 'starmind.enterprise-market.bundle', schemaVersion: 1, plugin,
       ...(options.title ? { title: options.title } : {}), ...(options.category ? { category: options.category } : {}),
@@ -184,5 +201,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const options = parseArgs(process.argv.slice(2))
     if (options.help) console.log('用法：node tools/prepare-offline.mjs --plugin name@1.2.3 | --tarball plugin.tgz --registry https://你的npm镜像/ --output plugin.dshbundle.json [--allow-origin https://可信制品源] [--npm-cli /path/npm-cli.js]')
     else await prepareOffline(options)
-  } catch (error) { console.error(`准备失败：${error.message}`); process.exitCode = 1 }
+  } catch (error) {
+    console.error(`准备失败：${error.message}`)
+    if (error.code === 'DEPENDENCY_MISSING') console.error(JSON.stringify(error.details, null, 2))
+    process.exitCode = 1
+  }
 }

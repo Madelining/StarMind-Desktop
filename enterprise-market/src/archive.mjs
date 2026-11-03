@@ -26,6 +26,7 @@ function safePath(value) {
   const clean = value.endsWith('/') ? value.slice(0, -1) : value;
   const parts = clean.split('/');
   assert(parts[0] === 'package' && parts.every(part => part && part !== '.' && part !== '..'), 'ARCHIVE_PATH_INVALID', '归档文件必须位于 package/ 内，且不能越界。');
+  assert(parts.every(part => !/[\x00-\x1f<>"|?*]/.test(part) && !/[. ]$/.test(part) && !/^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(part)), 'ARCHIVE_PATH_INVALID', '归档路径含 Windows 不支持的字符、尾缀或设备名。');
   return clean;
 }
 function pax(bytes) {
@@ -58,7 +59,7 @@ export function inspectTarball(input, options = {}) {
   try { tar = gunzipSync(buffer, { maxOutputLength: maxExpandedBytes }); }
   catch { throw new MarketError('ARCHIVE_INVALID', '无法解读 gzip，文件损坏或解压后超过限制。'); }
   let offset = 0, count = 0, manifest, readme, longPath, pendingPax = {}, globalPax = {};
-  const paths = new Set(), installRisks = [], nativeFiles = [];
+  const paths = new Set(), files = new Set(), windowsEntries = new Map(), impliedDirectories = new Set(), installRisks = [], nativeFiles = [];
   while (offset + 512 <= tar.length) {
     const header = tar.subarray(offset, offset + 512);
     if (header.every(byte => byte === 0)) {
@@ -90,13 +91,25 @@ export function inspectTarball(input, options = {}) {
     assert(type === '0' || type === '5', 'ARCHIVE_UNSUPPORTED', '不支持含符号链接、硬链接或特殊设备的归档。');
     const prefix = field(header, 345, 155);
     const mergedPax = { ...globalPax, ...pendingPax };
+    assert(!Object.keys(mergedPax).some(key => key.startsWith('GNU.sparse.') || key === 'SCHILY.realsize' || key === 'SCHILY.filetype'), 'ARCHIVE_UNSUPPORTED', '不支持含稀疏文件或特殊文件类型扩展的归档。');
     const raw = mergedPax.path ?? longPath ?? (prefix ? prefix + '/' : '') + field(header, 0, 100);
     const path = safePath(raw);
     if (mergedPax.size !== undefined) assert(String(size) === mergedPax.size, 'ARCHIVE_UNSUPPORTED', 'PAX size 扩展与 tar 头不一致。');
     pendingPax = {}; longPath = undefined;
-    assert(!paths.has(path), 'ARCHIVE_INVALID', '归档含重复路径。', 400, { path });
+    // Windows extracts case-insensitively; reject collisions before any client downloads this archive.
+    const windowsPath = path.toLowerCase();
+    assert(!windowsEntries.has(windowsPath), 'ARCHIVE_PATH_INVALID', '归档含重复路径或仅大小写不同的路径。', 400, { path });
+    const segments = windowsPath.split('/');
+    for (let index = 1; index < segments.length; index++) {
+      const parent = segments.slice(0, index).join('/');
+      assert(windowsEntries.get(parent) !== 'file', 'ARCHIVE_PATH_INVALID', '归档文件路径与父目录冲突。', 400, { path });
+      impliedDirectories.add(parent);
+    }
+    assert(type !== '0' || !impliedDirectories.has(windowsPath), 'ARCHIVE_PATH_INVALID', '归档文件路径与已有目录冲突。', 400, { path });
+    windowsEntries.set(windowsPath, type === '5' ? 'directory' : 'file');
     paths.add(path);
     if (type === '5') continue;
+    files.add(path);
     if (path === 'package/package.json') {
       assert(size <= 1024 * 1024 && !manifest, 'ARCHIVE_INVALID', 'package.json 过大或重复。');
       try { manifest = JSON.parse(text(body)); }
@@ -111,7 +124,7 @@ export function inspectTarball(input, options = {}) {
   if (typeof patch === 'string') {
     assert(!patch.startsWith('/') && !patch.includes('\\') && !patch.split('/').includes('..'), 'BUNDLE_INVALID', 'dsh.bundle.patch 路径非法。');
     const normalized = patch.replace(/^\.\//, '');
-    assert(paths.has('package/' + normalized), 'BUNDLE_INVALID', '归档缺少声明的 bundle patch。');
+    assert(files.has('package/' + normalized), 'BUNDLE_INVALID', '归档缺少声明的 bundle patch 文件。');
   }
   return { manifest, readme, paths: [...paths], installRisks, nativeFiles, size: buffer.length, sha256: hash(buffer), integrity: 'sha512-' + hash(buffer, 'sha512', 'base64') };
 }
