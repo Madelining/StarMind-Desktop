@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="same-origin">
+  <title>StarMind · 企业插件市场</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到插件列表</a>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="StarMind 企业插件市场首页"><span class="brand-mark" aria-hidden="true">✦</span><span>StarMind<span class="brand-separator">/</span><span class="brand-subtitle">插件市场</span></span></a>
+    <div class="top-actions">
+      <span id="bridgeBadge" class="connection-badge">网页端</span>
+      <button id="themeButton" class="icon-button" type="button" aria-label="切换显示主题" title="切换显示主题">◐</button>
+      <button id="loginButton" class="button ghost" type="button">发布者登录</button>
+      <span id="userName" class="user-name" hidden></span>
+      <button id="logoutButton" class="button ghost small" type="button" hidden>退出</button>
+      <button id="publishButton" class="button primary" type="button"><span aria-hidden="true">＋</span> 发布插件</button>
+    </div>
+  </header>
+
+  <main id="main" class="workspace" tabindex="-1">
+    <section class="page-heading" aria-labelledby="pageTitle">
+      <div><p class="eyebrow">YOUR TEAM’S TOOLBOX</p><h1 id="pageTitle">让 StarMind 多一种能力</h1><p class="intro">发现团队插件，连接日常工作。插件与依赖由公司市场统一分发。</p></div>
+      <div class="source-box"><span id="sourceDot" class="status-dot pending" aria-hidden="true"></span><div><strong id="sourceName">公司插件市场</strong><span id="connectionText">正在连接…</span></div><button id="refreshButton" class="icon-button" type="button" aria-label="刷新市场" title="刷新市场">↻</button></div>
+    </section>
+
+    <div id="connectionError" class="notice error" role="alert" hidden><strong>暂时无法连接公司市场</strong><span id="connectionErrorText"></span><button id="retryButton" class="button secondary small" type="button">重新连接</button></div>
+    <div id="embeddedNotice" class="notice info compact" hidden>已连接 StarMind。安装、更新和卸载前会由客户端再次确认。</div>
+
+    <nav class="tabs" aria-label="插件视图">
+      <button id="discoverTab" class="tab active" type="button" aria-current="page" data-view="discover">发现插件</button>
+      <button id="installedTab" class="tab" type="button" data-view="installed">已安装 <span id="installedCount" class="counter" hidden></span></button>
+      <button id="mineTab" class="tab" type="button" data-view="mine">我的发布</button>
+    </nav>
+
+    <section id="discoveryControls" class="catalog-controls" aria-label="搜索和筛选">
+      <div class="search-row"><div class="search-field"><span aria-hidden="true">⌕</span><label class="sr-only" for="searchInput">搜索插件名称、功能或包名</label><input id="searchInput" type="search" placeholder="搜索插件名称、功能或包名…" autocomplete="off" maxlength="200"><kbd aria-hidden="true">/</kbd></div><label class="sort-field" for="sortSelect"><span class="sr-only">排序方式</span><select id="sortSelect"><option value="newest">最近发布</option><option value="name">名称排序</option></select></label></div>
+      <div class="filter-row"><div id="categoryFilters" class="category-filters" role="group" aria-label="插件分类"></div><button id="favoriteFilter" class="favorite-filter" type="button" aria-pressed="false"><span aria-hidden="true">☆</span> 只看收藏 <span id="favoriteCount">0</span></button></div>
+    </section>
+
+    <div class="section-heading"><div><h2 id="sectionTitle">全部插件</h2><span id="resultCount" class="muted"></span></div><p id="sectionHint" class="section-hint">精确版本 · 内网分发</p></div>
+    <div id="loadingState" class="loading-state" role="status"><span class="spinner" aria-hidden="true"></span>正在加载插件…</div>
+    <div id="emptyState" class="empty-state" hidden><span class="empty-icon" aria-hidden="true">✧</span><h3 id="emptyTitle">还没有发布插件</h3><p id="emptyText">发布第一个团队插件，让同事可以在这里发现它。</p><button id="emptyAction" class="button secondary" type="button" hidden></button></div>
+    <div id="pluginGrid" class="plugin-grid" aria-label="插件列表"></div>
+    <p id="viewStatus" class="sr-only" role="status" aria-live="polite"></p>
+    <footer class="page-footer"><span>StarMind 企业插件市场</span><span>插件以当前用户权限运行。安装前请查看版本与依赖说明。</span></footer>
+  </main>
+
+  <dialog id="detailDialog" class="dialog detail-dialog" aria-labelledby="detailTitle"><div class="dialog-topline"><span class="eyebrow">PLUGIN DETAILS</span><button class="icon-button" type="button" data-close="detailDialog" aria-label="关闭插件详情">×</button></div><div id="detailContent"></div></dialog>
+
+  <dialog id="loginDialog" class="dialog login-dialog" aria-labelledby="loginTitle">
+    <div class="dialog-topline"><span class="eyebrow">PUBLISHER ACCESS</span><button class="icon-button" type="button" data-close="loginDialog" aria-label="关闭登录">×</button></div>
+    <h2 id="loginTitle">发布者登录</h2><p class="muted">使用管理员为你创建的访问令牌。令牌仅保留在本页内存中，关闭或刷新页面后需要重新登录。</p>
+    <form id="loginForm"><label for="tokenInput">访问令牌</label><input id="tokenInput" name="token" type="password" autocomplete="off" spellcheck="false" required placeholder="粘贴发布者访问令牌"><p id="loginError" class="form-error" role="alert" hidden></p><button id="loginSubmit" class="button primary full-width" type="submit">登录</button></form>
+    <p class="small muted">浏览、下载插件不需要登录。发布权限由市场管理员分配。</p>
+  </dialog>
+
+  <dialog id="publishDialog" class="dialog publish-dialog" aria-labelledby="publishTitle">
+    <div class="dialog-topline"><span class="eyebrow">SHARE WITH YOUR TEAM</span><button class="icon-button" type="button" data-close="publishDialog" aria-label="关闭发布窗口">×</button></div>
+    <h2 id="publishTitle">发布插件</h2><p class="muted">上传原始插件包及完整依赖，或导入从本市场下载的离线包。发布失败时会列出缺失依赖。</p>
+    <form id="publishForm">
+      <fieldset class="upload-mode"><legend class="sr-only">上传方式</legend><label><input type="radio" name="uploadMode" value="tgz" checked> 插件与依赖 .tgz</label><label><input type="radio" name="uploadMode" value="bundle"> 导入离线包</label></fieldset>
+      <div id="tgzFields"><label class="file-drop" for="packageFiles"><strong>选择插件包和依赖包</strong><span>可一次选择多个原始 .tgz 文件</span><input id="packageFiles" type="file" multiple accept=".tgz,.tar.gz,application/gzip"></label><ul id="selectedFiles" class="selected-files"></ul><p id="mainPackageHint" class="small muted">选择文件后，从包列表中指定主插件。包名和版本会从上传包中读取。</p><label for="mainPackageSelect">主插件包</label><select id="mainPackageSelect" disabled><option value="">先选择并上传文件</option></select><button id="uploadPackagesButton" class="button secondary" type="button" disabled>上传并读取包信息</button></div>
+      <div id="bundleFields" hidden><label class="file-drop" for="bundleFile"><strong>选择离线发布包</strong><span>.starmind-bundle.json，包含插件原始包及依赖</span><input id="bundleFile" type="file" accept=".json,application/json"></label><p id="bundleFileName" class="small muted"></p></div>
+      <div id="metadataFields" class="metadata-fields"><div class="form-two-columns"><div><label for="publishName">展示名称 <span class="optional">可选</span></label><input id="publishName" maxlength="120" placeholder="例如：团队知识库"></div><div><label for="publishCategory">分类 <span class="optional">可选</span></label><input id="publishCategory" maxlength="80" placeholder="例如：效率工具" list="categorySuggestions"><datalist id="categorySuggestions"></datalist></div></div><label for="publishDescription">一句话说明 <span class="optional">可选</span></label><textarea id="publishDescription" rows="2" maxlength="2000" placeholder="说明插件能帮助同事完成什么"></textarea><label for="publishReadme">使用说明 <span class="optional">Markdown，可选</span></label><textarea id="publishReadme" rows="5" maxlength="200000" placeholder="功能、配置方式、兼容范围和注意事项"></textarea></div>
+      <div id="uploadProgressBox" class="upload-progress" role="status" hidden><div><span id="uploadProgressLabel">正在上传…</span><span id="uploadProgressPercent"></span></div><progress id="uploadProgress" max="100" value="0"></progress></div>
+      <div id="publishError" class="notice error" role="alert" hidden></div>
+      <div class="form-actions"><button class="button ghost" type="button" data-close="publishDialog">取消</button><button id="publishSubmit" class="button primary" type="submit" disabled>发布插件</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="confirmDialog" class="dialog confirm-dialog" aria-labelledby="confirmTitle"><div class="dialog-topline"><span class="eyebrow">CONFIRM ACTION</span><button class="icon-button" type="button" data-close="confirmDialog" aria-label="关闭确认窗口">×</button></div><h2 id="confirmTitle"></h2><p id="confirmDescription" class="muted"></p><div class="form-actions"><button id="confirmCancel" class="button secondary" type="button">取消</button><button id="confirmAccept" class="button primary" type="button">确认</button></div></dialog>
+  <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

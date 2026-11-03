@@ -1,0 +1,8 @@
+{
+  "dataDir": "./data",
+  "host": "127.0.0.1",
+  "port": 8787,
+  "publicOrigin": "http://127.0.0.1:8787",
+  "marketId": "starmind-company",
+  "name": "StarMind 公司插件市场"
+}

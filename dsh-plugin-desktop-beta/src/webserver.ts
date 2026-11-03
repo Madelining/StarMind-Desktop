@@ -9,6 +9,7 @@ import type { Duplex } from 'node:stream'
 
 const MARKET_ROUTE = '/api/community-market'
 const isMarketRoute = (path: string): boolean => path === MARKET_ROUTE || path.startsWith(`${MARKET_ROUTE}/`)
+  || path === '/api/enterprise-market' || path.startsWith('/api/enterprise-market/')
 
 export default class NextWebServer extends WebServer {
   static override Config = WebServer.Config
@@ -105,3 +106,4 @@ export default class NextWebServer extends WebServer {
     } })
   }
 }
+

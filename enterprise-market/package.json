@@ -1,0 +1,13 @@
+{
+  "name": "@starmind/enterprise-market",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted offline StarMind plugin publishing and immutable registry",
+  "engines": { "node": ">=22.19.0" },
+  "scripts": {
+    "start": "node src/cli.mjs serve",
+    "test": "node --test test/*.test.mjs tests/*.test.mjs",
+    "prepare:offline": "node tools/prepare-offline.mjs"
+  }
+}

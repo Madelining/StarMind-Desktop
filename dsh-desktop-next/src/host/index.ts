@@ -27,6 +27,7 @@ import { formatFatalDiagnostic } from './fatal-diagnostic.ts'
 import * as desktopOffice from './office.ts'
 import { resolveOfficeConfig } from './office.ts'
 import { applyStarMindAgentIdentity } from './starmind-identity.ts'
+import { EnterpriseMarket, installEnterpriseMarketRoutes } from '../enterprise-market.ts'
 
 export async function main(): Promise<void> {
   // The Host lists and reads user workspaces; see asar-archive-policy.ts.
@@ -59,11 +60,13 @@ export async function main(): Promise<void> {
   delete process.env.DSH_NEXT_PREFERENCES
   delete process.env.DSH_NEXT_TRUSTED_HOSTS
   delete process.env[SYSTEM_PROXY_ENV]
-  const profile = loadNextProfile(projectDir, home)
+  const enterprise = new EnterpriseMarket(home, projectDir)
+  const profile = loadNextProfile(projectDir, home, undefined, enterprise.enabled)
   const runtimePatch = join(projectDir, 'desktop-next.runtime.patch.json')
   atomicJson(runtimePatch, [
     { id: 'desktop-next-webserver', config: { host: '127.0.0.1', port: preferences.port } },
     { id: 'connection', config: { trustedHosts } },
+    ...enterprise.profilePatch(),
   ])
   // runProfile installs the outbound proxy policy from this environment before any plugin mounts.
   const { environment, resolution: proxy } = withSystemProxy(loadLayeredEnv('dsh-desktop-next'), systemProxy, trustedHosts as string[])
@@ -79,9 +82,12 @@ export async function main(): Promise<void> {
     environment, profile: basename(projectDir),
     resolvedProfile: { profile, installAnchor: NEXT_PACKAGE,
       readPatches: profilePatches => readNextProfilePatches(projectDir, home,
-        [join(runtimeDir, 'host.cordis.patch.yml'), join(projectDir, 'desktop-next.cordis.patch.json'), runtimePatch], profilePatches) },
+        [join(runtimeDir, 'host.cordis.patch.yml'), join(projectDir, 'desktop-next.cordis.patch.json'), runtimePatch], profilePatches, enterprise.enabled) },
     patchFiles: [join(runtimeDir, 'host.cordis.patch.yml'), join(projectDir, 'desktop-next.cordis.patch.json'), runtimePatch], args: ['--no-open', '--port', String(preferences.port)],
-    packageManager: bundledPnpmInvocation(runtimeDir),
+    packageManager: (() => {
+      const invocation = bundledPnpmInvocation(runtimeDir)
+      return { ...invocation, env: { ...invocation.env, ...enterprise.pnpmEnvironment() } }
+    })(),
   })
   // Memory evidence for the Desktop's incident snapshots. Pushed rather than requested, so a Host too
   // busy or too short of memory to answer still leaves its last reading behind (#1511).
@@ -135,6 +141,7 @@ export async function main(): Promise<void> {
   })
   process.once('disconnect', () => { void stop().catch(fatal) })
   const { ctx } = await application
+  installEnterpriseMarketRoutes(ctx, enterprise)
   ctx.effect(
     () => ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
       return applyStarMindAgentIdentity(await next())
@@ -173,3 +180,4 @@ function fatal(error: unknown): void {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) void main().catch(fatal)
+

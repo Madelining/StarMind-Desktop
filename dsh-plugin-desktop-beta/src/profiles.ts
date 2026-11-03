@@ -14,6 +14,7 @@ import { RETIRED_SCHEDULE_BUNDLE, retiredSchedulePatch } from './profile-schedul
 import { removeLinkProjectionsSafely } from '../../dsh-plugin-desktop/src/link-projections.ts'
 import { insideArchive, unpackedPath } from './asar-archive-policy.ts'
 import { PROFILE_TEMPLATES } from './upstream-family.ts'
+import { ENTERPRISE_PUBLIC_BUNDLES } from './enterprise-market.ts'
 
 export const NEXT_PACKAGE = fileURLToPath(new URL('../package.json', import.meta.url))
 export const WEB_BUNDLES = [...PROFILE_TEMPLATES.web!.bundles]
@@ -311,7 +312,7 @@ function retireLinkProjections(projectDir: string): void {
 }
 
 /** Add product capabilities without replacing the upstream Web presentation. */
-export function loadNextProfile(projectDir: string, home: string, installAnchor = NEXT_PACKAGE): Profile {
+export function loadNextProfile(projectDir: string, home: string, installAnchor = NEXT_PACKAGE, enterprise = false): Profile {
   const manager = new NextProfiles(home)
   if (manager.directory(basename(projectDir)) !== resolve(projectDir)) throw new Error('Profile must belong to Next home')
   manager.ensure(basename(projectDir))
@@ -333,6 +334,7 @@ export function loadNextProfile(projectDir: string, home: string, installAnchor 
   if (existingLink && (linkTarget === undefined || resolve(modules, readlinkSync(link)) !== linkTarget)) unlinkSync(link)
   if (linkTarget !== undefined && !lstatSync(link, { throwIfNoEntry: false })) symlinkSync(linkTarget, link, 'junction')
   const profile = loadProfileDirectory('dsh-plugin-desktop-beta', projectDir, installAnchor)
+  if (enterprise) profile.layers = profile.layers.filter(layer => !ENTERPRISE_PUBLIC_BUNDLES.has(layer.packageName))
   profile.layers.push({ packageName: 'dsh-plugin-desktop-beta', packageDir: target,
     patchPaths: [NEXT_BUNDLE_PATCH], patches: loadOverlayPatches('dsh-plugin-desktop-beta', NEXT_BUNDLE_PATCH) })
   const overlay = [
@@ -368,8 +370,9 @@ function archivedAgentsAnywhereConfig(installAnchor: string): { connectorSourceD
 }
 
 /** Recompose Next's own layer before user/global patches on every manager or HMR read. */
-export function readNextProfilePatches(projectDir: string, home: string, overlays: readonly string[], profilePatches?: readonly Profile['patches'][number][]) {
+export function readNextProfilePatches(projectDir: string, home: string, overlays: readonly string[], profilePatches?: readonly Profile['patches'][number][], enterprise = false) {
   const profile = loadProfileDirectory('dsh-plugin-desktop-beta', projectDir, NEXT_PACKAGE, { userLayer: false })
+  if (enterprise) profile.layers = profile.layers.filter(layer => !ENTERPRISE_PUBLIC_BUNDLES.has(layer.packageName))
   profile.layers.push({ packageName: 'dsh-plugin-desktop-beta', packageDir: dirname(NEXT_PACKAGE),
     patchPaths: [NEXT_BUNDLE_PATCH], patches: loadOverlayPatches('dsh-plugin-desktop-beta', NEXT_BUNDLE_PATCH) })
   profile.patches = profilePatches === undefined
@@ -381,3 +384,4 @@ export function readNextProfilePatches(projectDir: string, home: string, overlay
     telemetryDisabledEnv: process.env.DSH_TELEMETRY_DISABLED }
   return readProfilePatches('dsh-plugin-desktop-beta', context, profile)
 }
+

@@ -1,4 +1,5 @@
 import { registerStarMindBrand } from './starmind-brand.tsx'
+import { registerEnterpriseMarket } from './enterprise-market.tsx'
 /** Compose Next capabilities into the official frontend. */
 import { createElement, useEffect, useState } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
@@ -35,6 +36,7 @@ export const inject = ['slots', 'layout', 'locale']
 
 export function apply(ctx: Context): void {
   registerStarMindBrand(ctx)
+  registerEnterpriseMarket(ctx)
   ctx.effect(installUiDiagnostics, 'AA and Plugins client lifecycle diagnostics')
   ctx.effect(() => ctx.locale.register('desktop-next', {
     zh: { settings: '桌面设置', language: 'zh', safeMode: '安全模式', safeModeDetail: '当前使用临时环境。退出安全模式并重启后返回原 Profile，临时数据不会保留。', dismiss: '关闭提示', recovery: '打开恢复助手' },
@@ -177,3 +179,4 @@ function DesktopSettings({ t, adapter, close, openPlugins }: PropsLocale<'deskto
 function SettingsActions({ t, adapter }: PropsLocale<'desktop-next'> & { adapter: NextSettingsAdapter }) {
   return createElement(NextDesktopActions, { adapter, language: t('language') })
 }
+

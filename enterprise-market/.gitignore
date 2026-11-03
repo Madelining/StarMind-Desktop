@@ -1,0 +1,7 @@
+data/
+runtime/
+node_modules/
+market.config.json
+*.dshbundle.json
+*.starmind-bundle.json
+*.tmp

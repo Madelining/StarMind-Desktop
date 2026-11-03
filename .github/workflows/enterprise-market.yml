@@ -1,0 +1,143 @@
+name: Enterprise Plugin Market
+
+on:
+  push:
+    branches: [feat/enterprise-plugin-market]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: enterprise-market-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  market-service:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22.23.2, 24.21.0]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Test service, browser contracts and real npm offline preparation
+        run: node --test enterprise-market/test/*.test.mjs enterprise-market/tests/*.test.mjs
+
+  desktop:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.2
+      - run: corepack enable
+      - name: Resolve Yarn cache folder
+        id: yarn-cache
+        run: echo "dir=$(yarn config get cacheFolder)" >> "$env:GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: yarn-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('yarn.lock', '.yarnrc.yml') }}
+          restore-keys: |
+            yarn-${{ runner.os }}-${{ runner.arch }}-
+      - uses: actions/cache@v6
+        with:
+          path: |
+            dsh-plugin-desktop-beta/.desktop-build/downloads
+            dsh-plugin-desktop-beta/.desktop-build/runtime
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: enterprise-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('yarn.lock', 'deepseek-harness/scripts/primary-runtime/lock.json', 'dsh-plugin-desktop-beta/package.json') }}
+          restore-keys: |
+            installer-downloads-${{ runner.os }}-${{ runner.arch }}-
+            enterprise-downloads-${{ runner.os }}-${{ runner.arch }}-
+      - run: yarn install --immutable
+      - name: Verify Beta and Next boundaries
+        run: yarn check:desktop-variants
+      - name: Validate Beta product
+        run: yarn workspace dsh-plugin-desktop-beta check
+      - name: Validate Next product
+        run: yarn workspace dsh-desktop-next check
+      - name: Verify real Host install, update, restart and removal against the private registry
+        run: node dsh-plugin-desktop-beta/scripts/verify-enterprise-market.mjs
+      - name: Verify Windows packaging
+        run: yarn workspace dsh-plugin-desktop-beta check:win-package:platform
+      - name: Build Windows x64 installer
+        env:
+          DSH_BETA_BUILD_VERSION: 2.0.21-beta.2
+          DSH_PACKAGE_CHECK_ALREADY_RAN: '1'
+          DSH_WINDOWS_PACKAGE_COMPRESSION: normal
+        run: yarn workspace dsh-plugin-desktop-beta dist:win
+      - name: Collect client installer
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem -LiteralPath 'dsh-plugin-desktop-beta/dist' -Filter '*-x64-Setup.exe' -File)
+          if ($files.Count -ne 1) { throw 'Expected exactly one Windows installer' }
+          $out = Join-Path $env:RUNNER_TEMP 'enterprise-client'
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          Copy-Item -LiteralPath $files[0].FullName -Destination $out
+          $digest = (Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  $($files[0].Name)" | Set-Content -LiteralPath (Join-Path $out 'SHA256SUMS.txt') -Encoding utf8NoBOM
+          [ordered]@{version='2.0.21-beta.2'; sourceCommit=$env:GITHUB_SHA; sourceRef=$env:GITHUB_REF; installer=$files[0].Name; sha256=$digest; signed=$false; enterpriseMarketImplemented=$true; workflowRun="$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $out 'build-info.json') -Encoding utf8NoBOM
+      - uses: actions/upload-artifact@v7
+        with:
+          name: StarMind-Enterprise-Market-Windows-Client-${{ github.run_number }}
+          path: ${{ runner.temp }}/enterprise-client
+          retention-days: 90
+          if-no-files-found: error
+          compression-level: 0
+
+  market-windows-delivery:
+    needs: market-service
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.2
+      - name: Assemble standalone offline service with Node and npm
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'StarMind-Market-Server-Windows-x64'
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          Copy-Item -Path 'enterprise-market/*' -Destination $out -Recurse
+          $runtime = Join-Path $out 'runtime'
+          New-Item -ItemType Directory -Path $runtime -Force | Out-Null
+          $nodeHome = Split-Path (Get-Command node).Source
+          foreach ($name in @('node.exe', 'LICENSE', 'node_modules')) {
+            $source = Join-Path $nodeHome $name
+            if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination $runtime -Recurse }
+          }
+          if (!(Test-Path -LiteralPath (Join-Path $runtime 'node.exe'))) { throw 'Missing Node executable' }
+          if (!(Test-Path -LiteralPath (Join-Path $runtime 'node_modules/npm/bin/npm-cli.js'))) { throw 'Missing bundled npm for offline preparation' }
+          $receipt = [ordered]@{sourceCommit=$env:GITHUB_SHA; nodeVersion=(node --version); platform='win32'; arch='x64'; installRequired=$false; runtimeDependenciesVendored=$true}
+          $receipt | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $out 'build-info.json') -Encoding utf8NoBOM
+          Get-ChildItem -LiteralPath $out -Recurse -File | ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath($out, $_.FullName).Replace('\', '/')
+            "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $relative"
+          } | Set-Content -LiteralPath (Join-Path $out 'SHA256SUMS.txt') -Encoding utf8NoBOM
+      - uses: actions/upload-artifact@v7
+        with:
+          name: StarMind-Market-Server-Windows-x64-${{ github.run_number }}
+          path: ${{ runner.temp }}/StarMind-Market-Server-Windows-x64
+          retention-days: 90
+          if-no-files-found: error
+          compression-level: 6
