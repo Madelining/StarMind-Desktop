@@ -59,7 +59,13 @@ it('archives the application like upstream Desktop while keeping fuses and nativ
   // Both CPU payloads ride beside the archive as extra resources; electron-builder must not re-sign the pre-signed payloads.
   // macOS also carries the manifest copy the updaters shipped in 2.0.14-next through 2.0.17-next read beside the archive.
   expect(next.build.mac.extraResources).toEqual([{ from: '.desktop-build/runtime', to: 'runtime' }, { from: '.desktop-build/payload/package.json', to: 'app/package.json' }])
-  expect(next.build.win.extraResources).toEqual([{ from: '.desktop-build/runtime', to: 'runtime' }])
+  // Windows also carries the offline workflow plugin kit introduced by this product branch.
+  expect(next.build.win.extraResources).toEqual([
+    { from: '.desktop-build/runtime', to: 'runtime' },
+    { from: '../adt-cpd-workflow/installer/bootstrap-plugins.mjs', to: 'plugin-kit/bootstrap-plugins.mjs' },
+    { from: '../adt-cpd-workflow/installer/plugin-kit.json', to: 'plugin-kit/plugin-kit.json' },
+    { from: '../adt-cpd-workflow/plugins/vendor', to: 'plugin-kit/vendor' },
+  ])
   expect(next.build.linux.extraResources).toEqual([{ from: '.desktop-build/runtime', to: 'runtime' }])
   expect(next.build.extraResources).toBeUndefined()
   expect(next.build.mac.signIgnore).toContain('/Contents/Resources/runtime/(?:arm64|x64)/primary-runtime(?:/|$)')

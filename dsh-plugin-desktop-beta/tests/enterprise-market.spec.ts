@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
@@ -25,6 +25,28 @@ it('keeps invalid enterprise policy blocked and removes all public market layers
   expect(market.enabled).toBe(true); expect(market.configError).toBeDefined()
   expect(market.profilePatch()[0]?.config.fallbackRegistries).toEqual([])
   expect(market.filterProfile({ layers: [{ packageName: 'dshmarket' }, { packageName: 'dsh-community-market' }, { packageName: 'desktop' }] }).layers).toEqual([{ packageName: 'desktop' }])
+})
+it('preserves a configured company CA when the settings renderer omits its private path', () => {
+  const { home, profile } = setup()
+  const path = join(home, 'enterprise-market.json')
+  const policy = JSON.parse(readFileSync(path, 'utf8'))
+  writeFileSync(path, JSON.stringify({ ...policy, caFile: join(home, 'company-ca.pem') }))
+  const market = new EnterpriseMarket(home, profile)
+  expect(market.state().caConfigured).toBe(true)
+  expect(market.state().config.caFile).toBeUndefined()
+  expect(market.state().managed).toBe(false)
+  market.save({ ...policy, url: 'https://plugins.company.internal', allowHttp: false })
+  expect(JSON.parse(readFileSync(path, 'utf8')).caFile).toBe(join(home, 'company-ca.pem'))
+})
+it('marks administrator policy read-only even when it is disabled, and refuses settings writes', () => {
+  const { home, profile } = setup()
+  const path = join(home, 'enterprise-market.json')
+  writeFileSync(path, JSON.stringify({ schemaVersion: 1, enabled: false, url: '', allowHttp: false }))
+  vi.stubEnv('STARMIND_ENTERPRISE_POLICY', path)
+  const market = new EnterpriseMarket(home, profile)
+  expect(market.state().managed).toBe(true)
+  expect(() => market.save({ schemaVersion: 1, enabled: true, url: 'https://other.internal', allowHttp: false })).toThrow('管理员')
+  expect(JSON.parse(readFileSync(path, 'utf8')).enabled).toBe(false)
 })
 it('does not rewrite an old external lock; it blocks new enterprise installs', () => {
   const { home, profile } = setup()

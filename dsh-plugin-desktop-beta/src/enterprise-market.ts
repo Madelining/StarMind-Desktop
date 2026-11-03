@@ -23,7 +23,8 @@ export function parseEnterpriseMarketConfig(value: unknown): EnterpriseMarketCon
   if (v.schemaVersion !== 1 || typeof v.enabled !== 'boolean' || typeof v.url !== 'string' || typeof v.allowHttp !== 'boolean'
     || (v.caFile !== undefined && typeof v.caFile !== 'string')
     || Object.keys(v).some(k => !['schemaVersion', 'enabled', 'url', 'allowHttp', 'caFile'].includes(k))) throw new Error('企业市场配置字段无效')
-  if (!v.enabled && v.url === '') return { ...DEFAULT_CONFIG }
+  if (!v.enabled && v.url === '') return { ...DEFAULT_CONFIG,
+    ...(v.caFile === undefined ? {} : { caFile: v.caFile as string }) }
   const url = new URL(v.url)
   if (url.username || url.password || url.search || url.hash || !['http:', 'https:'].includes(url.protocol)
     || url.pathname !== '/' || (url.protocol === 'http:' && !v.allowHttp)) throw new Error('请填写市场服务器 Origin；HTTP 需要明确允许')
@@ -259,8 +260,9 @@ export class EnterpriseMarket {
   state() {
     let issues: string[] = []
     try { issues = enterpriseProfileIssues(this.profileDirectory, this.config) } catch (error) { issues = [String(error)] }
-    return { config: { ...this.config, caFile: undefined }, enabled: this.enabled, error: this.configError,
-      profileIssues: issues, busy: this.busy, managed: this.enabled && !this.configError && issues.length === 0 }
+    return { config: { ...this.config, caFile: undefined }, caConfigured: this.config.caFile !== undefined,
+      enabled: this.enabled, error: this.configError, profileIssues: issues, busy: this.busy,
+      managed: Boolean(process.env.STARMIND_ENTERPRISE_POLICY), profileReady: this.enabled && !this.configError && issues.length === 0 }
   }
   async connect(): Promise<Record<string, unknown>> {
     if (this.configError) throw new Error(this.configError)
@@ -275,6 +277,9 @@ export class EnterpriseMarket {
     if (process.env.STARMIND_ENTERPRISE_POLICY) throw new Error('当前企业市场地址由管理员配置，不能在界面覆盖')
     if (this.busy) throw new Error('请等待插件操作完成后修改配置')
     const config = parseEnterpriseMarketConfig(value)
+    // The renderer intentionally does not receive the local certificate path.
+    // A normal settings edit preserves it unless a caller explicitly supplies caFile.
+    if (this.config.caFile !== undefined && !Object.hasOwn(value as object, 'caFile')) config.caFile = this.config.caFile
     atomicJson(join(this.home, 'enterprise-market.json'), config)
     return { restartRequired: true }
   }

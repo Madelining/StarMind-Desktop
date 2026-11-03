@@ -20,8 +20,10 @@ let market, host
 const requests = []
 const second = '@starmind/enterprise-second-smoke'
 const networkGuard = join(temporary, 'network-guard.cjs'), networkAudit = join(temporary, 'network-violations.log')
+const guardReceipts = join(temporary, 'network-guard-loaded.jsonl')
 writeFileSync(networkGuard, `
 const net = require('node:net'); const fs = require('node:fs');
+fs.appendFileSync(process.env.STARMIND_NETWORK_GUARD_RECEIPTS, JSON.stringify({ pid: process.pid, argv: process.argv }) + '\\n');
 const connect = net.Socket.prototype.connect;
 net.Socket.prototype.connect = function(...args) {
   const first = Array.isArray(args[0]) ? args[0][0] : args[0];
@@ -59,6 +61,7 @@ async function boot() {
   host = new DesktopHostProcess(process.execPath, root, profileDirectory, undefined,
     { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1', STARMIND_ENTERPRISE_POLICY: join(home, 'enterprise-market.json'),
       NODE_OPTIONS: `--require "${networkGuard.replaceAll('\\', '/')}"`, STARMIND_NETWORK_AUDIT_LOG: networkAudit,
+      STARMIND_NETWORK_GUARD_RECEIPTS: guardReceipts,
       HTTP_PROXY: '', HTTPS_PROXY: '', ALL_PROXY: '', http_proxy: '', https_proxy: '', all_proxy: '' },
     undefined, undefined, undefined, join(root, 'scripts', 'fixtures', 'isolated-user-host.mjs'), () => {})
   let timer
@@ -177,7 +180,12 @@ try {
   assert.ok(requests.some(path => path.startsWith('/npm/')), 'Real pnpm must read company metadata')
   assert.ok(requests.some(path => path.startsWith('/artifacts/')), 'Real pnpm must download original artifacts')
   assert.equal(existsSync(networkAudit) ? readFileSync(networkAudit, 'utf8') : '', '', 'Host and package-manager children must not attempt external connections')
-  console.log(JSON.stringify({ test: 'enterprise-real-host', status: 'passed', installedTwoPlugins: true, updated: true, activationFailureRestored: true, removedAfterRestart: true, requestCount: requests.length }))
+  const guarded = readFileSync(guardReceipts, 'utf8').trim().split('\n').map(line => JSON.parse(line))
+  const hostProcesses = new Set(guarded.filter(row => row.argv.some(arg => /(?:^|\/)isolated-user-host\.mjs$/u.test(arg.replaceAll('\\', '/')))).map(row => row.pid))
+  const pnpmProcesses = new Set(guarded.filter(row => row.argv.some(arg => /(?:^|\/)pnpm\.(?:mjs|cjs|js)$/u.test(arg.replaceAll('\\', '/')))).map(row => row.pid))
+  assert.ok(hostProcesses.size >= 2, 'Network guard must have loaded in both actual Host launches')
+  assert.ok(pnpmProcesses.size > 0, 'Network guard must have loaded in a real pnpm subprocess')
+  console.log(JSON.stringify({ test: 'enterprise-real-host', status: 'passed', installedTwoPlugins: true, updated: true, activationFailureRestored: true, removedAfterRestart: true, requestCount: requests.length, guardedHostProcesses: hostProcesses.size, guardedPnpmProcesses: pnpmProcesses.size }))
 } finally {
   if (host) await host.stop(true).catch(() => {})
   if (market) { market.server.closeAllConnections(); await market.close() }

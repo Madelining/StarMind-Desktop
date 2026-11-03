@@ -5,7 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 
 interface Config { schemaVersion: 1; enabled: boolean; url: string; allowHttp: boolean }
-interface State { config: Config; enabled: boolean; error?: string; profileIssues: string[]; busy: boolean; managed: boolean }
+interface State { config: Config; caConfigured: boolean; enabled: boolean; error?: string; profileIssues: string[]; busy: boolean; managed: boolean }
 const API = '/api/enterprise-market'
 async function request<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(`${API}/${path}`, {
@@ -110,11 +110,15 @@ function EnterpriseMarketDialog() {
         <button type="button" disabled={busy} aria-label="关闭企业市场" onClick={() => setOpen(false)}>×</button>
       </header>
       {settings && <form onSubmit={e => { e.preventDefault(); void save() }} style={{ padding: 20, display: 'grid', gap: 12, borderBottom: '1px solid #8883' }}>
+        {state?.managed && <p role="status" style={{ margin: 0 }}>市场设置由公司管理员统一管理，请联系管理员修改。</p>}
+        {state?.caConfigured && <p style={{ margin: 0, fontSize: 12 }}>已配置公司证书。保存设置会保留现有证书配置。</p>}
+        <fieldset disabled={busy || state?.managed} style={{ display: 'grid', gap: 12, border: 0, margin: 0, padding: 0, minWidth: 0 }}>
         <label><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} /> 启用企业模式（公共插件市场停止联网）</label>
         <label>公司市场地址 <input aria-label="公司市场地址" type="url" placeholder="https://plugins.company.internal" value={url} onChange={e => setUrl(e.target.value)} style={{ width: 'min(600px, 75%)', padding: 8 }} /></label>
         <label><input type="checkbox" checked={allowHttp} onChange={e => setAllowHttp(e.target.checked)} /> 允许管理员部署的内网 HTTP 服务</label>
         <p style={{ fontSize: 12, margin: 0 }}>企业模式采用公司固定分发源。旧 Profile 若保存公网包地址，需要先新建 Profile；配置不会自动改写旧锁文件。</p>
         <div><button disabled={busy} type="submit">保存配置</button></div>
+        </fieldset>
       </form>}
       {error && <div role="alert" style={{ color: '#b42318', background: '#fff0ed', padding: '10px 20px' }}>{error}</div>}
       {!!state?.profileIssues.length && <div style={{ padding: '10px 20px' }}>

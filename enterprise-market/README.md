@@ -85,6 +85,7 @@ node --test enterprise-market/test/*.test.mjs enterprise-market/tests/*.test.mjs
 
 ```sh
 yarn check:desktop-variants
+yarn workspace dsh-community-market build
 yarn workspace dsh-plugin-desktop-beta check
 yarn workspace dsh-desktop-next check
 node dsh-plugin-desktop-beta/scripts/verify-enterprise-market.mjs

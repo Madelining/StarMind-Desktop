@@ -1,18 +1,33 @@
 /** Build the official Computer Use helpers for the Desktop packages that ship the official bundle, and only for them. */
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { accessSync, chmodSync, constants, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { cuaNativeEntries, prepareCuaNative, type RunXcrun } from '../../scripts/upstream-family/cua-native.ts'
 
+vi.mock('node:fs', async importOriginal => {
+  const original = await importOriginal<typeof import('node:fs')>()
+  return { ...original, chmodSync: vi.fn(original.chmodSync) }
+})
+
 const roots: string[] = []
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+  vi.clearAllMocks()
 })
 
 const BUNDLE = '@deepseek-ai/dsh-cua-bundle'
 const PROVIDER = '@deepseek-ai/dsh-experimental-cua-macos'
+
+function expectExecutable(helper: string) {
+  // The helper targets macOS, even when the mocked Swift build is tested on Windows.
+  // Windows chmod maps only the writable bit and cannot represent POSIX execute bits.
+  expect(chmodSync).toHaveBeenCalledWith(helper, 0o755)
+  expect(statSync(helper).isFile()).toBe(true)
+  if (process.platform === 'win32') expect(() => accessSync(helper, constants.R_OK | constants.W_OK)).not.toThrow()
+  else expect(statSync(helper).mode & 0o777).toBe(0o755)
+}
 
 /** A Desktop package root, with the official bundle as a dependency and its provider installed unless omitted. */
 function desktop(options: { bundle?: boolean; provider?: boolean } = {}): string {
@@ -48,7 +63,7 @@ it('builds each CPU helper into the provider package with the arguments the prov
     '--configuration', 'release', '--product', 'dsh-cua-native', '--arch', arch === 'x64' ? 'x86_64' : 'arm64']))
   expect(readFileSync(helpers[0]!, 'utf8')).toBe('helper arm64')
   expect(readFileSync(helpers[1]!, 'utf8')).toBe('helper x86_64')
-  for (const helper of helpers) expect(statSync(helper).mode & 0o777).toBe(0o755)
+  for (const helper of helpers) expectExecutable(helper)
   expect(cuaNativeEntries(root)).toEqual([
     { arch: 'arm64', path: `node_modules/${PROVIDER}/native/bin/darwin-arm64/dsh-cua-native` },
     { arch: 'x86_64', path: `node_modules/${PROVIDER}/native/bin/darwin-x64/dsh-cua-native` },
@@ -84,7 +99,7 @@ it('uses the helper the official release ships without compiling or rewriting it
   expect(prepareCuaNative(root, ['arm64'], run)).toEqual([official])
   expect(run).not.toHaveBeenCalled()
   expect(readFileSync(official, 'utf8')).toBe('official arm64')
-  expect(statSync(official).mode & 0o777).toBe(0o755)
+  expectExecutable(official)
   // A release that starts shipping the helper replaces the one Desktop recorded; the record no longer matches it.
   const [built] = prepareCuaNative(root, ['x64'], run)
   writeFileSync(built!, 'official x64')

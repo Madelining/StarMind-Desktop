@@ -530,6 +530,7 @@ it('explains the first Windows GPU launch failure in a native dialog, records it
     }))
     const gpu = { type: 'GPU', reason: 'launch-failed', exitCode: 18 }
     // Other platforms and other children keep Chromium's own handling.
+    Object.defineProperty(process, 'platform', { ...platform, value: 'linux' })
     app.emit('child-process-gone', {}, gpu)
     Object.defineProperty(process, 'platform', { ...platform, value: 'win32' })
     app.emit('child-process-gone', {}, { type: 'Utility', reason: 'launch-failed', exitCode: 18, serviceName: 'audio.mojom.AudioService' })
@@ -1136,7 +1137,8 @@ it.each(['complete', 'official', 'skip'] as const)('shows first-run onboarding w
     expect(main.webContents.mainFrame.url).toBe('dsh-app://app/')
     expect(await setup(mainSender, { action: 'read' })).toMatchObject({
       required: false,
-      accountPending: outcome !== 'skip',
+      // Profile onboarding no longer schedules the retired separate account setup step.
+      accountPending: false,
       input: {
         market: outcome === 'skip' ? 'disabled' : outcome === 'official' ? 'official-market' : 'dsh-market',
         openBrowser: outcome === 'complete',
