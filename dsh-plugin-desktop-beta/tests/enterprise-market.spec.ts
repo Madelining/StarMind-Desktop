@@ -27,7 +27,7 @@ it('anchors profile plugin imports to the currently installed package after a pn
     if (parents.length) unlinkSync(projection)
     symlinkSync(target, projection, 'junction')
     const parent = enterprisePackageParent(`${name}/exported`, profile, installation)
-    expect(parent).toBe(pathToFileURL(realpathSync(join(target, 'package.json'))).href)
+    expect(parent).toBe(pathToFileURL(realpathSync.native(join(target, 'package.json'))).href)
     parents.push(parent!)
   }
   expect(parents[0]).not.toBe(parents[1])
